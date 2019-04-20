@@ -3,6 +3,9 @@
 ; Input file: orig/CLOCK.SYSTEM.SYS
 ; Page:       1
 
+
+        .include "common.inc"
+
         .org $2000
         .setcpu "6502"
 
@@ -775,69 +778,12 @@ L2565:  lda     #$02
         ora     ($00,x)
         asl     a
         and     $12,x
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        brk
-        rol     $5953
-        .byte   $53
-        .byte   $54
-        eor     $4D
-        .byte   $0C
-        .byte   $43
-        jmp     L434F
 
-        .byte   $4B
-        rol     $5953
-        .byte   $53
-        .byte   $54
-        eor     $4D
+        .res 50, 0
+
+        .byte   ".SYSTEM"
+        PASCAL_STRING "CLOCK.SYSTEM"
+
         .byte   $5A
         ldy     $3008
         eor     $7764
@@ -1051,6 +997,8 @@ L2716:  ldy     #$A0
         sbc     $EE,x
         inc     $EEE9
         .byte   $E7
+
+
         ldy     #$00
         .byte   $FF
         .byte   $FF
@@ -1065,134 +1013,23 @@ L2716:  ldy     #$A0
         brk
         brk
         brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+
         .byte   $FF
         brk
         .byte   $FF
@@ -1201,27 +1038,7 @@ L2716:  ldy     #$A0
         brk
         .byte   $FF
         adc     $00
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
+
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
