@@ -5,7 +5,7 @@
 
 
         .include "common.inc"
-
+        .feature string_escapes
         .org $2000
         .setcpu "6502"
 
@@ -21,8 +21,6 @@ L119F           := $119F
 L11AA           := $11AA
 L11C0           := $11C0
 L11C3           := $11C3
-L434F           := $434F
-L9F00           := $9F00
 LBF00           := $BF00
 LBF06           := $BF06
 LC300           := $C300
@@ -72,11 +70,11 @@ L2041:  sty     $07
         sta     $09
         bne     L206B
         lda     #$8D
-        sta     L2624
-        sta     L26E3
-        sta     L2700
-        sta     L2716
-        sta     L2684
+        sta     $2624           ; TODO: modifying string resource?
+        sta     $26E3           ; ???
+        sta     $2700           ; ???
+        sta     $2716           ; ???
+        sta     $2684           ; ???
         inc     L2095
         inc     L2099
         bne     L206E
@@ -757,288 +755,55 @@ L2565:  lda     #$02
         .byte   $0C
         .byte   $12
         ora     ($0B,x)
-        .byte   $12
-        .byte   $03
-        rts
-
-        brk
-        .byte   $1C
-        brk
-        brk
-        .byte   $03
-        ora     a:$12,x
-        .byte   $1C
-        brk
-        .byte   $04
-        brk
-        brk
-        jsr     L9F00
-        brk
-        brk
-        ora     ($00,x)
-        asl     a
-        and     $12,x
+        .byte   $12,$03,$60,$00,$1C,$00,$00,$03
+        .byte   $1D,$12,$00,$1C,$00,$04,$00,$00
+        .byte   $20,$00,$9F,$00,$00,$01,$00,$0A
+        .byte   $35,$12
 
         .res 50, 0
 
         .byte   ".SYSTEM"
+
         PASCAL_STRING "CLOCK.SYSTEM"
 
-        .byte   $5A
-        ldy     $3008
-        eor     $7764
-        .byte   $87
-        tax
-        rol     a
-        .byte   $47
-        cmp     $1212
-        .byte   $13
-        .byte   $13
-        .byte   $13
-        .byte   $13
-        .byte   $13
-        .byte   $13
-        .byte   $13
-        .byte   $13
-        .byte   $13
-        .byte   $12
-        cmp     #$EE
-        .byte   $F3
-        .byte   $F4
-        sbc     ($EC,x)
-        cpx     $C3A0
-        cpx     $E3EF
-        .byte   $EB
-        ldy     #$C4
-        .byte   $F2
-        sbc     #$F6
-        sbc     $F2
-        ldy     #$B1
-L260F           := * + 1
-L2610           := * + 2
-        ldx     $A0B5
-        sta     $EFC3
-L2615           := * + 1
-        beq     L260F
-        .byte   $F2
-        sbc     #$E7
-        inx
-        .byte   $F4
-        ldy     #$A8
-        .byte   $E3
-        lda     #$A0
-        lda     ($B9),y
-        clv
-L2624           := * + 1
-        ldx     $A0,y
-        .byte   $C3
-        .byte   $F2
-        sbc     $E1
-        .byte   $F4
-        sbc     #$F6
-        sbc     $A0
-        bne     L2615
-        .byte   $F2
-        sbc     #$F0
-        inx
-        sbc     $F2
-        sbc     ($EC,x)
-        .byte   $F3
-        ldy     #$D5
-        inc     $E9EC
-        sbc     $F4E9
-        sbc     $E4
-        ldy     $C9A0
-        inc     $AEE3
-        brk
-        cmp     $EE,x
-        sbc     ($E2,x)
-        cpx     $A0E5
-        .byte   $F4
-        .byte   $EF
-        ldy     #$E6
-        sbc     #$EE
-        cpx     $A0
-        sbc     ($A0,x)
-        .byte   $A7
-        ldx     $D9D3
-        .byte   $D3
-        .byte   $D4
-        cmp     $CD
-        .byte   $A7
-        ldy     #$E6
-        sbc     #$EC
-        sbc     $A1
-        brk
-        .byte   $D2
-L266C:  sbc     $ED
-        .byte   $EF
-        inc     $E5,x
-        ldy     #$D7
-        .byte   $F2
-        sbc     #$F4
-        sbc     $AD
-        bne     L266C
-        .byte   $EF
-        .byte   $F4
-        sbc     $E3
-        .byte   $F4
-        ldy     #$F4
-        sbc     ($E2,x)
-L2684           := * + 1
-        ldy     $D2A0
-        sbc     $F0
-        cpx     $E3E1
-L268B:  sbc     $A0
-        cpx     $E9
-        .byte   $F3
-        .byte   $EB
-        ldy     $E1A0
-        inc     $A0E4
-        bne     L268B
-        sbc     $F3
-        .byte   $F3
-        ldy     #$E1
-        ldy     #$EB
-        sbc     $F9
-        ldx     $AEAE
-        brk
-        cpy     $E9
-        .byte   $F3
-        .byte   $EB
-        ldy     #$E5
-        .byte   $F2
-        .byte   $F2
-        .byte   $EF
-        .byte   $F2
-        lda     ($A0,x)
-        cmp     $EE,x
-        sbc     ($E2,x)
-        cpx     $A0E5
-        .byte   $F4
-        .byte   $EF
-        ldy     #$E3
-        .byte   $EF
-        inc     $E9F4
-        inc     $E5F5
-        lda     ($A1,x)
-        lda     ($00,x)
-        .byte   $D3
-        sbc     $E9
-        .byte   $EB
-        .byte   $EF
-        ldy     #$AF
-        .byte   $AF
-        .byte   $E3
-        ldy     #$E4
-        .byte   $F2
-        sbc     #$F6
-        sbc     $F2
-        ldy     #$E9
-        inc     $F4F3
-        sbc     ($EC,x)
-        cpx     $E4E5
-L26E3           := * + 1
-        ldx     a:$A0
-        .byte   $D3
-        sbc     $E9
-        .byte   $EB
-        .byte   $EF
-        ldy     #$AF
-        .byte   $AF
-        sbc     $A0
-        cpx     $F2
-        sbc     #$F6
-        sbc     $F2
-        ldy     #$E9
-        inc     $F4F3
-        sbc     ($EC,x)
-        cpx     $E4E5
-L2700           := * + 1
-        ldx     a:$A0
-        .byte   $C3
-        sbc     $F2,x
-        .byte   $F2
-        sbc     $EE
-        .byte   $F4
-        ldy     #$F9
-        sbc     $E1
-        .byte   $F2
-        ldy     #$E9
-        .byte   $F3
-        ldy     #$B1
-        lda     $AE00,y
-L2716:  ldy     #$A0
-        ldy     #$A0
-        .byte   $CF
-        .byte   $CB
-        .byte   $BF
-        ldy     #$A8
-        cmp     $CEAF,y
-        lda     #$A0
-        brk
-        dec     $A0EF
-        .byte   $E3
-        cpx     $E3EF
-        .byte   $EB
-        lda     ($A0,x)
-        cpy     $F2
-        sbc     #$F6
-        sbc     $F2
-        ldy     #$EE
-        .byte   $EF
-        .byte   $F4
-        ldy     #$E9
-        inc     $F4F3
-        sbc     ($EC,x)
-        cpx     $E4E5
-        ldx     $AEAE
-        sta     $D200
-        sbc     $EE,x
-        inc     $EEE9
-        .byte   $E7
+        .byte   $5A,$AC,$08,$30,$4D,$64,$77,$87
+        .byte   $AA,$2A,$47,$CD,$12,$12,$13,$13
+        .byte   $13,$13,$13,$13,$13,$13,$13,$12
 
+        HIASCII "Install Clock Driver 1.5"
 
-        ldy     #$00
-        .byte   $FF
-        .byte   $FF
-        brk
-        .byte   $04
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        brk
-        brk
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+L2610:  HIASCIIZ " \rCopyright (c) 1986 Creative Peripherals Unlimited, Inc."
+        HIASCIIZ "Unable to find a '.SYSTEM' file!"
+        HIASCIIZ "Remove Write-Protect tab, Replace disk, and Press a key..."
+        HIASCIIZ "Disk error! Unable to continue!!!"
+        HIASCIIZ "Seiko //c driver installed. "
+        HIASCIIZ "Seiko //e driver installed. "
+        HIASCII  "Current year is 19"
+        .byte    0
+        HIASCIIZ ".    OK? (Y/N) "
+        HIASCIIZ "No clock! Driver not installed...\r"
+        HIASCIIZ "Running "
 
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        brk
-        .byte   $FF
-        adc     $00
-
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
-        .byte   $FF, $00, $FF, $00, $FF, $00, $FF, $00
+        .byte   $FF,$FF,$00,$04,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$00,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
+        .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$65
+        .byte   $00,$FF,$00,$FF,$00,$FF,$00,$FF
+        .byte   $00,$FF,$00,$FF,$00,$FF,$00,$FF
+        .byte   $00,$FF,$00,$FF,$00,$FF,$00,$FF
+        .byte   $00

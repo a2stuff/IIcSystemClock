@@ -5,4 +5,5 @@ GLOBAL {
   CPU         "6502";
 };
 
-RANGE { START $2000; END $FFFF; TYPE Code; };
+RANGE { START $2000; END $257F; TYPE Code; };
+RANGE { START $2580; END $FFFF; TYPE ByteTable; };
