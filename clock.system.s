@@ -1,11 +1,8 @@
-; da65 V2.17 - Git 5ac11b5e
-; Created:    2019-04-20 15:45:09
-; Input file: orig/CLOCK.SYSTEM.SYS
-; Page:       1
-
-
+        .include "opcodes.inc"
+        .include "apple2.inc"
         .include "common.inc"
         .feature string_escapes
+
         .org $2000
         .setcpu "6502"
 
@@ -21,14 +18,8 @@ L119F           := $119F
 L11AA           := $11AA
 L11C0           := $11C0
 L11C3           := $11C3
-LBF00           := $BF00
-LBF06           := $BF06
 LC300           := $C300
-LFC58           := $FC58
-LFCA8           := $FCA8
-LFD0C           := $FD0C
-LFDDA           := $FDDA
-LFDED           := $FDED
+
 L2000:
 L2001           := * + 1
         lda     #$06
@@ -45,7 +36,7 @@ L2013:  ldx     #$FF
         lda     #$00
         sta     $BFFC
         sta     $BFFD
-        sta     $C082
+        sta     ROMIN2
         lda     $03F3
         eor     #$FF
         sta     $03F4
@@ -182,7 +173,7 @@ L2135:  ldy     #$07
         lda     $BF98
         ror     a
         bcc     L2145
-        jsr     LFC58
+        jsr     MON_HOME
         jmp     L1000
 
 L2145:  lda     #$00
@@ -192,8 +183,8 @@ L2145:  lda     #$00
         sta     $BF93
         jmp     L11AA
 
-L2156:  lda     #$4C
-        sta     LBF06
+L2156:  lda     #OPC_JMP_abs
+        sta     DATETIME
         lda     $BF98
         ora     #$01
         sta     $BF98
@@ -222,10 +213,10 @@ L218C:  bit     $C010
 L2199:  ldy     #$05
         jsr     L10EF
         lda     $11FF
-        jsr     LFDDA
+        jsr     PRBYTE
         ldy     #$06
         jsr     L10EF
-L21A9:  jsr     LFD0C
+L21A9:  jsr     RDKEY
         and     #$DF
         cmp     #$D9
         beq     L21D3
@@ -267,8 +258,8 @@ L2203           := * + 2
         sta     $F000,y
         dey
         bpl     L21FE
-        jsr     LBF06
-        lda     $C082
+        jsr     DATETIME
+        lda     ROMIN2
         jmp     L1000
 
 L2210:  lda     $11FF
@@ -506,12 +497,12 @@ L236B:  lda     $C063
 L238A:  jsr     L2265
         rts
 
-L238E:  jsr     LFD0C
+L238E:  jsr     RDKEY
         cmp     #$B0
         bcc     L238E
         cmp     #$BA
         bcs     L238E
-        jmp     LFDED
+        jmp     COUT
 
 L239C:  .byte   $DF
         .byte   $FF
@@ -578,7 +569,7 @@ L2415:  lda     ($00),y
         sta     $121D,y
         sta     $0280,y
         ora     #$80
-        jsr     LFDED
+        jsr     COUT
         iny
         cpy     $05
         bne     L2415
@@ -587,13 +578,13 @@ L2415:  lda     ($00),y
         sta     $22
         lda     #$18
         sta     $23
-        jsr     LFC58
+        jsr     MON_HOME
         lda     $09
         beq     L2443
         lda     #$15
-        jsr     LFDED
+        jsr     COUT
         lda     #$8D
-        jsr     LFDED
+        jsr     COUT
 L2443:  jmp     L2000
 
 L2446:  clc
@@ -640,14 +631,14 @@ L248C:  rts
         beq     L24A4
         cpy     #$08
         beq     L24A4
-        jsr     LFC58
+        jsr     MON_HOME
 L24A4:  ldy     #$00
 L24A6:  lda     $F000,y
         beq     L24B7
         cmp     #$E0
         bcc     L24B1
         and     $08
-L24B1:  jsr     LFDED
+L24B1:  jsr     COUT
         iny
         bne     L24A6
 L24B7:  rts
@@ -659,9 +650,9 @@ L24BF:  lda     $BF90,y
         sta     $1203,y
         dey
         bpl     L24BF
-        lda     #$60
-        sta     LBF06
-        jsr     LBF00
+        lda     #OPC_RTS
+        sta     DATETIME
+        jsr     PRODOS
         .byte   $C3
         sbc     $D011,y
         asl     $A9
@@ -675,21 +666,21 @@ L24BF:  lda     $BF90,y
         ldy     #$0B
         jsr     L10EF
         jsr     L11C3
-        jsr     LFD0C
+        jsr     RDKEY
         jmp     L111A
 
-        jsr     LBF00
+        jsr     PRODOS
         iny
         sbc     #$11
         bne     L2546
         lda     $11EE
         sta     $11F0
-        jsr     LBF00
+        jsr     PRODOS
         dex
         .byte   $EF
         ora     ($D0),y
         .byte   $43
-        jsr     LBF00
+        jsr     PRODOS
         cpy     $11F7
         bne     L2546
         rts
@@ -697,7 +688,7 @@ L24BF:  lda     $BF90,y
         lda     $BF30
         sta     $11DD
         sta     $11E4
-        jsr     LBF00
+        jsr     PRODOS
         cmp     $DC
         ora     ($D0),y
         and     #$AD
@@ -709,17 +700,17 @@ L24BF:  lda     $BF90,y
         sty     $120B
         lda     #$2F
         sta     $120C
-        jsr     LBF00
+        jsr     PRODOS
         dec     $E0
         ora     ($D0),y
         .byte   $12
-        jsr     LBF00
+        jsr     PRODOS
         cpy     $F9
         ora     ($D0),y
         asl     a
         rts
 
-        jsr     LBF00
+        jsr     PRODOS
         .byte   $80
         .byte   $E3
         ora     ($D0),y
@@ -731,8 +722,8 @@ L2546:  ldy     #$02
         lda     $0B
         cmp     #$07
         bne     L255E
-        lda     #$60
-        sta     LBF06
+        lda     #OPC_RTS
+        sta     DATETIME
         jmp     L1000
 
 L255E:  jmp     L11C0
@@ -740,10 +731,10 @@ L255E:  jmp     L11C0
         lda     #$20
         sta     $0C
 L2565:  lda     #$02
-        jsr     LFCA8
+        jsr     WAIT
         sta     $C030
         lda     #$24
-        jsr     LFCA8
+        jsr     WAIT
         sta     $C030
         dec     $0C
         bne     L2565
