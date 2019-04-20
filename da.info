@@ -1,0 +1,8 @@
+GLOBAL {
+  OUTPUTNAME  "clock.system.s";
+  INPUTNAME   "orig/CLOCK.SYSTEM.SYS";
+  STARTADDR   $2000;
+  CPU         "6502";
+};
+
+RANGE { START $2000; END $FFFF; TYPE Code; };
