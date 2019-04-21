@@ -120,7 +120,7 @@ L2099           := * + 1
         lsr     a
         sta     L22C7
         jsr     L222B
-        sta     $11FF
+        sta     L11FF
         ldx     DEVCNT
 L20AF:  lda     DEVLST,x
         and     #$0F
@@ -142,7 +142,7 @@ L20C8:  lda     DEVLST,x
 L20CB:  and     #%01110000      ; slot
         ora     #$80
         sta     L22E3           ; Set $C0nn address
-        lda     $11FE
+        lda     L11FE
         and     #$03
         beq     L20E3
         cmp     #$02
@@ -150,13 +150,14 @@ L20CB:  and     #%01110000      ; slot
         lda     $07
         bne     L20EE
         beq     L20FE
-L20E3:  ldy     #$38
+L20E3:  ldy     #$38            ; offset into patch #1
         lda     $07
         beq     L20F0
-        ldy     #$00
+        ldy     #$00            ; offset into patch #2
         jmp     L20F0
 
-L20EE:  ldy     #$70
+        ;; Patch bytes on top of driver
+L20EE:  ldy     #$70            ; offset into patch #3
 L20F0:  ldx     #$00
 L20F2:  lda     L22E2,y
         sta     L2269,x
@@ -164,6 +165,7 @@ L20F2:  lda     L22E2,y
         inx
         cpx     #$38
         bne     L20F2
+
 L20FE:  lda     #$02
         sta     L210F
 L2103:  jsr     L223F
@@ -183,7 +185,7 @@ L2111:  lda     $07
         iny
         sty     L226A
         sty     L2274
-        lda     $11FE
+        lda     L11FE
         and     #$03
         beq     L20FE
         sty     L229F
@@ -195,6 +197,8 @@ L2135:  ldy     #$07
         bcc     L2145
         jsr     MON_HOME
         jmp     L1000
+
+        ;; --------------------------------------------------
 
 L2145:  lda     #$00
         sta     DATELO
@@ -213,7 +217,7 @@ L2156:  lda     #OPC_JMP_abs
         lda     $0A
         cmp     #$0B
         bcc     L2176
-        bit     $11FE
+        bit     L11FE
         bpl     L2176
         sta     $1204
 L2176:  lda     $1204
@@ -226,13 +230,13 @@ L2176:  lda     $1204
         sbc     $1204
         bcs     L21DF
 L218C:  bit     KBDSTRB
-        rol     $11FE
+        rol     L11FE
         lda     #$03
         cmp     $0A
-        ror     $11FE
+        ror     L11FE
 L2199:  ldy     #$05
         jsr     L10EF
-        lda     $11FF
+        lda     L11FF
         jsr     PRBYTE
         ldy     #$06
         jsr     L10EF
@@ -249,11 +253,11 @@ L21A9:  jsr     RDKEY
         asl     a
         asl     a
         asl     a
-        sta     $11FF
+        sta     L11FF
         jsr     L238E
         and     #$0F
-        ora     $11FF
-        sta     $11FF
+        ora     L11FF
+        sta     L11FF
         jmp     L2199
 
 L21D3:  lda     $1204
@@ -269,7 +273,7 @@ L21DF:  lda     RWRAM1
         sta     L22B1
         lda     DATETIME+2
         sta     L2203
-        adc     #$00
+        adc     #0
         sta     L22B2
 
         ;; Relocate clock driver
@@ -285,7 +289,7 @@ L2203           := * + 2
         lda     ROMIN2
         jmp     L1000
 
-L2210:  lda     $11FF
+L2210:  lda     L11FF
         pha
         lsr     a
         lsr     a
@@ -427,6 +431,15 @@ L22DB           := * + 1
         .byte   $63
         .byte   $FF
         .byte   $62
+
+        ;; End of relocated clock driver
+
+;;; ============================================================
+
+        ;; Patches applied to driver (length $38, at offset 0)
+
+        ;; Patch #1
+patch1:
 L22E2:
 L22E3           := * + 1
         lda     $C0E0           ; Set to $C0x0, n=slot+8
@@ -458,6 +471,13 @@ L2307:  lda     MOUSE_BTN
         ldy     #$04
         dex
         bpl     L2300
+        .assert * - patch1 = $38, error, "Patch length"
+
+        ;; --------------------------------------------------
+        ;; Patch #2
+patch2:
+        .assert * - $38 = L22E2, error, "Offset changed"
+
         lda     PORT2_ACIA_COMMAND
         nop
         ldy     #$03
@@ -489,8 +509,17 @@ L233A:  lda     PORT2_ACIA_STATUS
         ldy     #$04
         dex
         bpl     L2335
+
         nop
         nop
+
+        .assert * - patch2 = $38, error, "Patch length"
+
+        ;; --------------------------------------------------
+        ;; Patch #3
+patch3:
+        .assert * - $70 = L22E2, error, "Offset changed"
+
         lda     ENVBL
         sta     ENBXY
         sta     X0EDGE1
@@ -521,13 +550,18 @@ L236B:  lda     MOUSE_BTN
         dex
         bpl     L2369
         lda     DISVBL
+        .assert * - patch3 = $38, error, "Patch length"
+
+;;; ============================================================
+
+
 L238A:  jsr     L2265
         rts
 
 L238E:  jsr     RDKEY
-        cmp     #$B0
+        cmp     #'0' | $80
         bcc     L238E
-        cmp     #$BA
+        cmp     #('9'+1) | $80
         bcs     L238E
         jmp     COUT
 
@@ -547,11 +581,11 @@ L239E:
 
 L1000:
         ldy     #$00
-        sty     $11E8
+        sty     L11E8
         iny
         sty     $04
         iny
-        sty     $11E7
+        sty     L11E7
         jsr     L119F
         lda     $1C23
         sta     $02
@@ -573,16 +607,16 @@ L1021:  ldy     #$10
         and     #$0F
         sta     $05
         tay
-        ldx     #$06
+        ldx     #strlen_str_system - 1
 L103A:  lda     ($00),y
-        cmp     $122E,x
+        cmp     str_system,x
         bne     L10A8
         dey
         dex
         bpl     L103A
-        ldy     #$0C
+        ldy     #strlen_str_clock_system
 L1047:  lda     ($00),y
-        cmp     $1235,y
+        cmp     str_clock_system,y
         bne     L1053
         dey
         bne     L1047
@@ -637,9 +671,9 @@ L10A8:  clc
         cmp     $03
         bne     L10E2
         ldy     $1C02
-        sty     $11E7
+        sty     L11E7
         lda     $1C03
-        sta     $11E8
+        sta     L11E8
         bne     L10D3
         tya
         bne     L10D3
@@ -655,22 +689,25 @@ L10D3:  jsr     L119F
         sta     $01
 L10E2:  jmp     L1021
 
-L10E5:  lda     $11FE
+L10E5:  lda     L11FE
         and     #$03
         bne     L10EE
         ldy     #$09
 L10EE:  rts
 
 L10EF:  lda     $1242,y
-        sta     $1109
-        lda     $124E,y
-        sta     $110A
+        sta     L1109
+        lda     L124E,y
+        sta     L1109+1
         cpy     #$06
         beq     L1106
         cpy     #$08
         beq     L1106
         jsr     MON_HOME
 L1106:  ldy     #$00
+
+        L1109 := *+1
+
 L1108:  lda     $F000,y
         beq     L1119
         cmp     #$E0
@@ -682,7 +719,7 @@ L1113:  jsr     COUT
 L1119:  rts
 
 L111A:  lda     #$07
-        sta     $11F9
+        sta     L11F9
         ldy     #$03
 L1121:  lda     DATELO,y
         sta     $1203,y
@@ -690,7 +727,7 @@ L1121:  lda     DATELO,y
         bpl     L1121
         lda     #OPC_RTS
         sta     DATETIME
-        PRODOS_CALL MLI_SET_FILE_INFO, $11F9
+        PRODOS_CALL MLI_SET_FILE_INFO, L11F9
         bne     :+
 
         lda     #OPC_JMP_abs
@@ -707,8 +744,8 @@ L1121:  lda     DATELO,y
 
 L114F:  PRODOS_CALL MLI_OPEN, $11E9
         bne     L11A8
-        lda     $11EE
-        sta     $11F0
+        lda     L11EE
+        sta     L11F0
 
         PRODOS_CALL MLI_READ, $11EF
         bne     L11A8
@@ -718,8 +755,8 @@ L114F:  PRODOS_CALL MLI_OPEN, $11E9
         rts
 
 L116E:  lda     DEVNUM
-        sta     $11DD
-        sta     $11E4
+        sta     L11DD
+        sta     L11E4
 
         PRODOS_CALL MLI_ON_LINE, $11DC
         bne     L11A8
@@ -735,7 +772,7 @@ L116E:  lda     DEVNUM
         PRODOS_CALL MLI_SET_PREFIX, $11E0
         bne     L11A8
 
-        PRODOS_CALL MLI_GET_FILE_INFO, $11F9
+        PRODOS_CALL MLI_GET_FILE_INFO, L11F9
         bne     L11A8
         rts
 
@@ -769,24 +806,43 @@ L11C7:  lda     #$02
         rts
 
         .byte   $02
-        rts
+L11DD:  .byte   $60
 
         .byte   $0C
         .byte   $12
-        ora     ($0B,x)
-        .byte   $12,$03,$60,$00,$1C,$00,$00,$03
-        .byte   $1D,$12,$00,$1C,$00,$04,$00,$00
-        .byte   $20,$00,$9F,$00,$00,$01,$00,$0A
+        .byte   $01,$0B
+        .byte   $12,$03
+L11E4:  .byte   $60
+        .byte   $00,$1C
+L11E7:  .byte   $00
+L11E8:  .byte   $00
+        .byte   $03
+        .byte   $1D,$12,$00,$1C
+L11EE:  .byte   $00
+        .byte   $04
+L11F0:  .byte   $00
+        .byte   $00
+        .byte   $20,$00,$9F,$00,$00,$01,$00
+L11F9:  .byte   $0A
         .byte   $35,$12
 
-        .res 50, 0
+L11FC:  .byte   0
+L11FD:  .byte   0
+L11FE:  .byte   0
+L11FF:  .byte   0
+        .res 46, 0
 
+str_system:
         .byte   ".SYSTEM"
+        strlen_str_system = .strlen(".SYSTEM")
 
+str_clock_system:
         PASCAL_STRING "CLOCK.SYSTEM"
+        strlen_str_clock_system = .strlen("CLOCK.SYSTEM")
 
         .byte   $5A,$AC,$08,$30,$4D,$64,$77,$87
-        .byte   $AA,$2A,$47,$CD,$12,$12,$13,$13
+        .byte   $AA,$2A,$47,$CD
+L124E:  .byte   $12,$12,$13,$13
         .byte   $13,$13,$13,$13,$13,$13,$13,$12
 
         HIASCII "Install Clock Driver 1.5"
