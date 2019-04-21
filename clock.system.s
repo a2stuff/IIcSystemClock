@@ -6,18 +6,6 @@
         .org $2000
         .setcpu "6502"
 
-L068D           := $068D
-L1000           := $1000
-L1021           := $1021
-L10E5           := $10E5
-L10EF           := $10EF
-L111A           := $111A
-L114F           := $114F
-L116E           := $116E
-L119F           := $119F
-L11AA           := $11AA
-L11C0           := $11C0
-L11C3           := $11C3
 LC300           := $C300
 
 L2000:
@@ -27,7 +15,7 @@ L2003           := * + 1
         lda     #$A0
         cmp     #$CC
         bne     L2013
-        sta     L2610
+        sta     L239E + (L1272 - L1000) ; In relocated code
         lda     #$5C
         sta     L2285
         sta     L2336
@@ -70,14 +58,22 @@ L2041:  sty     $07
         inc     L2099
         bne     L206E
 L206B:  jsr     LC300
-L206E:  ldy     #$00
+
+
+
+        ;; Copy to $1000
+
+L206E:  ldy     #0
+
+        ;; End signature is two adjacent $FFs
 L2070:
 L2072           := * + 2
         lda     L239E,y
         cmp     #$FF
         bne     L207E
+
 L2079           := * + 2
-        ldx     L239F,y
+        ldx     L239E+1,y
         cpx     #$FF
         beq     L208F
 L207E:
@@ -85,10 +81,13 @@ L2080           := * + 2
         sta     L1000,y
         iny
         bne     L2070
+
         inc     L2072
         inc     L2079
         inc     L2080
-        bne     L2070
+
+        bne     L2070           ; always
+
 L208F:  ldy     #$00
         jsr     L10EF
 L2095           := * + 1
@@ -506,8 +505,19 @@ L238E:  jsr     RDKEY
 
 L239C:  .byte   $DF
         .byte   $FF
+
+
+
 L239E:
-L239F           := * + 1
+        ;; Relocated to $1000
+
+;;; ============================================================
+;;; Chaining code???
+;;; ============================================================
+
+        .org $1000
+
+L1000:
         ldy     #$00
         sty     $11E8
         iny
@@ -523,56 +533,56 @@ L239F           := * + 1
         sta     $00
         lda     #$1C
         sta     $01
-        ldy     #$10
+L1021:  ldy     #$10
         lda     ($00),y
         cmp     #$FF
-        bne     L2446
+        bne     L10A8
         ldy     #$00
         lda     ($00),y
         and     #$30
-        beq     L2446
+        beq     L10A8
         lda     ($00),y
         and     #$0F
         sta     $05
         tay
         ldx     #$06
-L23D8:  lda     ($00),y
+L103A:  lda     ($00),y
         cmp     $122E,x
-        bne     L2446
+        bne     L10A8
         dey
         dex
-        bpl     L23D8
+        bpl     L103A
         ldy     #$0C
-L23E5:  lda     ($00),y
+L1047:  lda     ($00),y
         cmp     $1235,y
-        bne     L23F1
+        bne     L1053
         dey
-        bne     L23E5
-        beq     L2446
-L23F1:  lda     $05
+        bne     L1047
+        beq     L10A8
+L1053:  lda     $05
         sta     $121D
         sta     $0280
         inc     $05
         lda     $0B
         cmp     #$07
-        beq     L240E
+        beq     L1070
         ldy     #$03
         jsr     L10E5
         lda     $07
-        beq     L240B
+        beq     L106D
         iny
-L240B:  jsr     L10EF
-L240E:  ldy     #$08
+L106D:  jsr     L10EF
+L1070:  ldy     #$08
         jsr     L10EF
         ldy     #$01
-L2415:  lda     ($00),y
+L1077:  lda     ($00),y
         sta     $121D,y
         sta     $0280,y
         ora     #$80
         jsr     COUT
         iny
         cpy     $05
-        bne     L2415
+        bne     L1077
         jsr     L114F
         lda     #$00
         sta     WNDTOP
@@ -580,14 +590,14 @@ L2415:  lda     ($00),y
         sta     WNDBTM
         jsr     MON_HOME
         lda     $09
-        beq     L2443
+        beq     L10A5
         lda     #$15
         jsr     COUT
         lda     #$8D
         jsr     COUT
-L2443:  jmp     L2000
+L10A5:  jmp     L2000
 
-L2446:  clc
+L10A8:  clc
         lda     $00
         adc     $02
         sta     $00
@@ -597,59 +607,59 @@ L2446:  clc
         inc     $04
         lda     $04
         cmp     $03
-        bne     L2480
+        bne     L10E2
         ldy     $1C02
         sty     $11E7
         lda     $1C03
         sta     $11E8
-        bne     L2471
+        bne     L10D3
         tya
-        bne     L2471
+        bne     L10D3
         ldy     #$01
         jmp     L11AA
 
-L2471:  jsr     L119F
+L10D3:  jsr     L119F
         lda     #$00
         sta     $04
         lda     #$04
         sta     $00
         lda     #$1C
         sta     $01
-L2480:  jmp     L1021
+L10E2:  jmp     L1021
 
-        lda     $11FE
+L10E5:  lda     $11FE
         and     #$03
-        bne     L248C
+        bne     L10EE
         ldy     #$09
-L248C:  rts
+L10EE:  rts
 
-        lda     $1242,y
+L10EF:  lda     $1242,y
         sta     $1109
         lda     $124E,y
         sta     $110A
         cpy     #$06
-        beq     L24A4
+        beq     L1106
         cpy     #$08
-        beq     L24A4
+        beq     L1106
         jsr     MON_HOME
-L24A4:  ldy     #$00
-L24A6:  lda     $F000,y
-        beq     L24B7
+L1106:  ldy     #$00
+L1108:  lda     $F000,y
+        beq     L1119
         cmp     #$E0
-        bcc     L24B1
+        bcc     L1113
         and     $08
-L24B1:  jsr     COUT
+L1113:  jsr     COUT
         iny
-        bne     L24A6
-L24B7:  rts
+        bne     L1108
+L1119:  rts
 
-        lda     #$07
+L111A:  lda     #$07
         sta     $11F9
         ldy     #$03
-L24BF:  lda     DATELO,y
+L1121:  lda     DATELO,y
         sta     $1203,y
         dey
-        bpl     L24BF
+        bpl     L1121
         lda     #OPC_RTS
         sta     DATETIME
         PRODOS_CALL MLI_SET_FILE_INFO, $11F9
@@ -660,31 +670,31 @@ L24BF:  lda     DATELO,y
         rts
 
 :       cmp     #$2B
-        bne     L2546
+        bne     L11A8
         ldy     #$0B
         jsr     L10EF
         jsr     L11C3
         jsr     RDKEY
         jmp     L111A
 
-        PRODOS_CALL MLI_OPEN, $11E9
-        bne     L2546
+L114F:  PRODOS_CALL MLI_OPEN, $11E9
+        bne     L11A8
         lda     $11EE
         sta     $11F0
 
         PRODOS_CALL MLI_READ, $11EF
-        bne     L2546
+        bne     L11A8
 
         PRODOS_CALL MLI_CLOSE, $11F7
-        bne     L2546
+        bne     L11A8
         rts
 
-        lda     DEVNUM
+L116E:  lda     DEVNUM
         sta     $11DD
         sta     $11E4
 
         PRODOS_CALL MLI_ON_LINE, $11DC
-        bne     L2546
+        bne     L11A8
 
         lda     $120C
         and     #$0F
@@ -695,39 +705,39 @@ L24BF:  lda     DATELO,y
         sta     $120C
 
         PRODOS_CALL MLI_SET_PREFIX, $11E0
-        bne     L2546
+        bne     L11A8
 
         PRODOS_CALL MLI_GET_FILE_INFO, $11F9
-        bne     L2546
+        bne     L11A8
         rts
 
-        PRODOS_CALL MLI_READ_BLOCK, $11E3
-        bne     L2546
+L119F:  PRODOS_CALL MLI_READ_BLOCK, $11E3
+        bne     L11A8
         rts
 
-L2546:  ldy     #$02
-        sty     $0B
+L11A8:  ldy     #$02
+L11AA:  sty     $0B
         jsr     L10EF
         jsr     L11C3
         lda     $0B
         cmp     #$07
-        bne     L255E
+        bne     L11C0
         lda     #OPC_RTS
         sta     DATETIME
         jmp     L1000
 
-L255E:  jmp     L11C0
+L11C0:  jmp     L11C0
 
-        lda     #$20
+L11C3:  lda     #$20
         sta     $0C
-L2565:  lda     #$02
+L11C7:  lda     #$02
         jsr     WAIT
         sta     $C030
         lda     #$24
         jsr     WAIT
         sta     $C030
         dec     $0C
-        bne     L2565
+        bne     L11C7
         rts
 
         .byte   $02
@@ -753,7 +763,9 @@ L2565:  lda     #$02
 
         HIASCII "Install Clock Driver 1.5"
 
-L2610:  HIASCIIZ " \rCopyright (c) 1986 Creative Peripherals Unlimited, Inc."
+L1272:  .byte   $A0
+
+        HIASCIIZ "\rCopyright (c) 1986 Creative Peripherals Unlimited, Inc."
         HIASCIIZ "Unable to find a '.SYSTEM' file!"
         HIASCIIZ "Remove Write-Protect tab, Replace disk, and Press a key..."
         HIASCIIZ "Disk error! Unable to continue!!!"
@@ -765,7 +777,13 @@ L2610:  HIASCIIZ " \rCopyright (c) 1986 Creative Peripherals Unlimited, Inc."
         HIASCIIZ "No clock! Driver not installed...\r"
         HIASCIIZ "Running "
 
-        .byte   $FF,$FF,$00,$04,$00
+        ;; Signature for end of range to copy to $1000
+        .byte   $FF,$FF
+
+;;; ============================================================
+
+
+        .byte   $00,$04,$00
         .byte   $FF,$00,$FF,$00,$FF,$00,$00,$00
         .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
         .byte   $FF,$00,$FF,$00,$FF,$00,$FF,$00
