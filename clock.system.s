@@ -652,9 +652,8 @@ L24BF:  lda     $BF90,y
         bpl     L24BF
         lda     #OPC_RTS
         sta     DATETIME
-        jsr     PRODOS
-        .byte   $C3
-        sbc     $D011,y
+        PRODOS_CALL $C3, $11F9
+        .byte   $D0
         asl     $A9
         jmp     L068D
 
@@ -669,28 +668,25 @@ L24BF:  lda     $BF90,y
         jsr     RDKEY
         jmp     L111A
 
-        jsr     PRODOS
-        iny
-        sbc     #$11
+        PRODOS_CALL $C8, $11E9
         bne     L2546
         lda     $11EE
         sta     $11F0
-        jsr     PRODOS
-        dex
-        .byte   $EF
-        ora     ($D0),y
+
+        PRODOS_CALL $CA, $11EF
+        .byte   $D0
         .byte   $43
-        jsr     PRODOS
-        cpy     $11F7
+
+        PRODOS_CALL $CC, $11F7
         bne     L2546
         rts
 
         lda     $BF30
         sta     $11DD
         sta     $11E4
-        jsr     PRODOS
-        cmp     $DC
-        ora     ($D0),y
+
+        PRODOS_CALL $C5, $11DC
+        .byte   $D0
         and     #$AD
         .byte   $0C
         .byte   $12
@@ -700,20 +696,18 @@ L24BF:  lda     $BF90,y
         sty     $120B
         lda     #$2F
         sta     $120C
-        jsr     PRODOS
-        dec     $E0
-        ora     ($D0),y
+
+        PRODOS_CALL $C6, $11E0
+        .byte   $D0
         .byte   $12
-        jsr     PRODOS
-        cpy     $F9
-        ora     ($D0),y
+
+        PRODOS_CALL $C4, $11F9
+        .byte   $D0
         asl     a
         rts
 
-        jsr     PRODOS
-        .byte   $80
-        .byte   $E3
-        ora     ($D0),y
+        PRODOS_CALL $80, $11E3
+        .byte   $D0
         ora     ($60,x)
 L2546:  ldy     #$02
         sty     $0B
