@@ -15,6 +15,7 @@ MAX_DW          := $FFFF
 ;;; Softswitches
 
 CLR80VID        := $C00C        ; 40 Columns
+SPKR            := $C030        ; Toggle speaker
 ROMIN2          := $C082        ; Read ROM; no write
 RWRAM1          := $C08B        ; Read/write RAM bank 1
 

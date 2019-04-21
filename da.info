@@ -1,5 +1,5 @@
 GLOBAL {
-  OUTPUTNAME  "clock.system.s";
+  OUTPUTNAME  "tmp.s";
   INPUTNAME   "orig/CLOCK.SYSTEM.SYS";
   STARTADDR   $2000;
   CPU         "6502";

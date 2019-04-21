@@ -6,7 +6,20 @@
         .org $2000
         .setcpu "6502"
 
-LC300           := $C300
+SLOT3_FIRMWARE           := $C300
+
+PORT2_ACIA_STATUS  := $C0A9
+PORT2_ACIA_COMMAND := $C0AA
+PORT2_ACIA_CONTROL := $C0AB
+
+DISXY           := $C058
+ENBXY           := $C059
+DISVBL          := $C05A
+ENVBL           := $C05B
+X0EDGE1         := $C05C
+X0EDGE2         := $C05D
+
+MOUSE_BTN          := $C063
 
 L2000:
 L2001           := * + 1
@@ -48,18 +61,24 @@ L2041:  sty     $07
         lsr     a
         sta     $09
         bne     L206B
+
         lda     #$8D
-        sta     $2624           ; TODO: modifying string resource?
-        sta     $26E3           ; ???
-        sta     $2700           ; ???
-        sta     $2716           ; ???
-        sta     $2684           ; ???
+
+        ;; Convert spaces to newlines if 40 Columns
+        sta     chain + (wrap1 - L1000)
+        sta     chain + (wrap4 - L1000)
+        sta     chain + (wrap5 - L1000)
+        sta     chain + (wrap3 - L1000)
+        sta     chain + (wrap2 - L1000)
+
         inc     L2095
         inc     L2099
         bne     L206E
-L206B:  jsr     LC300
+
+L206B:  jsr     SLOT3_FIRMWARE
 
 
+        ;; --------------------------------------------------
 
         ;; Copy to $1000
 
@@ -117,10 +136,12 @@ L20C2:  asl     a
         asl     a
         asl     a
         bne     L20CB
+
+
 L20C8:  lda     DEVLST,x
-L20CB:  and     #$70
+L20CB:  and     #%01110000      ; slot
         ora     #$80
-        sta     L22E3
+        sta     L22E3           ; Set $C0nn address
         lda     $11FE
         and     #$03
         beq     L20E3
@@ -187,7 +208,7 @@ L2156:  lda     #OPC_JMP_abs
         lda     MACHID
         ora     #%00000001      ; has clock
         sta     MACHID
-        bit     $C000
+        bit     KBD
         bmi     L218C
         lda     $0A
         cmp     #$0B
@@ -204,7 +225,7 @@ L2176:  lda     $1204
         lda     DATELO+1
         sbc     $1204
         bcs     L21DF
-L218C:  bit     $C010
+L218C:  bit     KBDSTRB
         rol     $11FE
         lda     #$03
         cmp     $0A
@@ -239,8 +260,8 @@ L21D3:  lda     $1204
         jsr     L2210
         jsr     L238A
         jsr     L111A
-L21DF:  lda     $C08B
-        lda     $C08B
+L21DF:  lda     RWRAM1
+        lda     RWRAM1
         lda     DATETIME+1
         sta     L2202
         clc
@@ -250,6 +271,9 @@ L21DF:  lda     $C08B
         sta     L2203
         adc     #$00
         sta     L22B2
+
+        ;; Relocate clock driver
+
         ldy     #$7C
 L21FE:  lda     L2265,y
 L2202           := * + 1
@@ -316,20 +340,24 @@ L223F:  jsr     L238A
         cmp     #$3C
 L2264:  rts
 
+;;; ============================================================
+;;; Clock Driver (Relocatable)
+;;; ============================================================
+
 L2265:  cld
         cld
         php
         sei
 L2269:
 L226A           := * + 1
-        lda     $C0AA
+        lda     PORT2_ACIA_COMMAND
         pha
         ldy     #$03
         ldx     #$16
         lda     #$08
 L2273:
 L2274           := * + 1
-        sta     $C0AA
+        sta     PORT2_ACIA_COMMAND
 L2276:  dex
         bne     L2276
         eor     #$0A
@@ -345,7 +373,7 @@ L2286:  .byte   $3A
         bne     L2286
 L2289:
 L228A           := * + 1
-        lda     $C0A9
+        lda     PORT2_ACIA_STATUS
         rol     a
         rol     a
         rol     a
@@ -358,7 +386,7 @@ L228A           := * + 1
         bpl     L2284
         pla
 L229F           := * + 1
-        sta     $C0AA
+        sta     PORT2_ACIA_COMMAND
         ldx     #$06
 L22A3:  lda     $0201,x
 L22A6:  dec     $0200,x
@@ -401,13 +429,13 @@ L22DB           := * + 1
         .byte   $62
 L22E2:
 L22E3           := * + 1
-        lda     $C0E0
-        lda     $C05A
+        lda     $C0E0           ; Set to $C0x0, n=slot+8
+        lda     DISVBL
         ldy     #$01
         ldx     #$16
 L22EC:  dex
         bne     L22EC
-        lda     $C05A,y
+        lda     DISVBL,y
         ldx     #$0B
         dey
         bpl     L22EC
@@ -420,7 +448,7 @@ L2300:  lda     #$5D
         sec
 L2303:  sbc     #$01
         bne     L2303
-L2307:  lda     $C063
+L2307:  lda     MOUSE_BTN
         rol     a
         ror     $0200,x
         lsr     $0201,x
@@ -430,12 +458,12 @@ L2307:  lda     $C063
         ldy     #$04
         dex
         bpl     L2300
-        lda     $C0AA
+        lda     PORT2_ACIA_COMMAND
         nop
         ldy     #$03
         ldx     #$16
         lda     #$02
-L2324:  sta     $C0AA
+L2324:  sta     PORT2_ACIA_COMMAND
 L2327:  dex
         bne     L2327
         eor     #$0A
@@ -449,7 +477,7 @@ L2336           := * + 1
         lda     #$5D
 L2337:  .byte   $3A
         bne     L2337
-L233A:  lda     $C0A9
+L233A:  lda     PORT2_ACIA_STATUS
         eor     #$20
         rol     a
         rol     a
@@ -463,36 +491,36 @@ L233A:  lda     $C0A9
         bpl     L2335
         nop
         nop
-        lda     $C05B
-        sta     $C059
-        sta     $C05C
+        lda     ENVBL
+        sta     ENBXY
+        sta     X0EDGE1
         nop
         nop
         nop
         nop
-        lda     $C058
+        lda     DISXY
         ldx     #$15
 L2364:  dex
         bne     L2364
         ldx     #$09
 L2369:  ldy     #$04
-L236B:  lda     $C063
+L236B:  lda     MOUSE_BTN
         rol     a
         ror     $0200,x
         lsr     $0201,x
-        sta     $C05D
+        sta     X0EDGE2
         nop
         nop
         nop
         nop
         nop
         nop
-        sta     $C05C
+        sta     X0EDGE1
         dey
         bne     L236B
         dex
         bpl     L2369
-        lda     $C05A
+        lda     DISVBL
 L238A:  jsr     L2265
         rts
 
@@ -507,7 +535,7 @@ L239C:  .byte   $DF
         .byte   $FF
 
 
-
+chain:
 L239E:
         ;; Relocated to $1000
 
@@ -732,10 +760,10 @@ L11C3:  lda     #$20
         sta     $0C
 L11C7:  lda     #$02
         jsr     WAIT
-        sta     $C030
+        sta     SPKR
         lda     #$24
         jsr     WAIT
-        sta     $C030
+        sta     SPKR
         dec     $0C
         bne     L11C7
         rts
@@ -765,15 +793,27 @@ L11C7:  lda     #$02
 
 L1272:  .byte   $A0
 
-        HIASCIIZ "\rCopyright (c) 1986 Creative Peripherals Unlimited, Inc."
+        HIASCII "\rCopyright (c) 1986 "
+        wrap1 := *-1
+        HIASCIIZ "Creative Peripherals Unlimited, Inc."
+
         HIASCIIZ "Unable to find a '.SYSTEM' file!"
-        HIASCIIZ "Remove Write-Protect tab, Replace disk, and Press a key..."
+
+        HIASCII "Remove Write-Protect tab, "
+        wrap2 := *-1
+        HIASCIIZ "Replace disk, and Press a key..."
+
         HIASCIIZ "Disk error! Unable to continue!!!"
         HIASCIIZ "Seiko //c driver installed. "
+        wrap4 := *-2
+
         HIASCIIZ "Seiko //e driver installed. "
+        wrap5 := *-2
+
         HIASCII  "Current year is 19"
-        .byte    0
-        HIASCIIZ ".    OK? (Y/N) "
+        .byte    0, $AE
+        wrap3 := *
+        HIASCIIZ "    OK? (Y/N) "
         HIASCIIZ "No clock! Driver not installed...\r"
         HIASCIIZ "Running "
 
