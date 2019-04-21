@@ -34,16 +34,16 @@ L2003           := * + 1
 L2013:  ldx     #$FF
         txs
         lda     #$00
-        sta     $BFFC
-        sta     $BFFD
+        sta     IBAKVER
+        sta     IVERSION
         sta     ROMIN2
         lda     $03F3
         eor     #$FF
         sta     $03F4
         ldy     #$00
         ldx     #$00
-        lda     $BF98
-        and     #$88
+        lda     MACHID
+        and     #%10001000      ; IIe or later, modifier
         beq     L2035
         inx
 L2035:  cmp     #$88
@@ -55,8 +55,8 @@ L2035:  cmp     #$88
 L2041:  sty     $07
         lda     L239C,x
         sta     $08
-        lda     $BF98
-        and     #$02
+        lda     MACHID
+        and     #%00000010      ; 80 Column card?
         lsr     a
         sta     $09
         bne     L206B
@@ -103,8 +103,8 @@ L2099           := * + 1
         sta     L22C7
         jsr     L222B
         sta     $11FF
-        ldx     $BF31
-L20AF:  lda     $BF32,x
+        ldx     DEVCNT
+L20AF:  lda     DEVLST,x
         and     #$0F
         beq     L20C8
         dex
@@ -118,7 +118,7 @@ L20C2:  asl     a
         asl     a
         asl     a
         bne     L20CB
-L20C8:  lda     $BF32,x
+L20C8:  lda     DEVLST,x
 L20CB:  and     #$70
         ora     #$80
         sta     L22E3
@@ -170,24 +170,24 @@ L2111:  lda     $07
         bne     L20FE
 L2135:  ldy     #$07
         sty     $0B
-        lda     $BF98
+        lda     MACHID
         ror     a
         bcc     L2145
         jsr     MON_HOME
         jmp     L1000
 
 L2145:  lda     #$00
-        sta     $BF90
-        sta     $BF91
-        sta     $BF92
-        sta     $BF93
+        sta     DATELO
+        sta     DATELO+1
+        sta     TIMELO
+        sta     TIMELO+1
         jmp     L11AA
 
 L2156:  lda     #OPC_JMP_abs
         sta     DATETIME
-        lda     $BF98
-        ora     #$01
-        sta     $BF98
+        lda     MACHID
+        ora     #%00000001      ; has clock
+        sta     MACHID
         bit     $C000
         bmi     L218C
         lda     $0A
@@ -200,9 +200,9 @@ L2176:  lda     $1204
         lsr     a
         cmp     #$56
         bcc     L218C
-        lda     $BF90
+        lda     DATELO
         cmp     $1203
-        lda     $BF91
+        lda     DATELO+1
         sbc     $1204
         bcs     L21DF
 L218C:  bit     $C010
@@ -242,12 +242,12 @@ L21D3:  lda     $1204
         jsr     L111A
 L21DF:  lda     $C08B
         lda     $C08B
-        lda     $BF07
+        lda     DATETIME+1
         sta     L2202
         clc
         adc     #$76
         sta     L22B1
-        lda     $BF08
+        lda     DATETIME+2
         sta     L2203
         adc     #$00
         sta     L22B2
@@ -297,9 +297,9 @@ L222D:  inx
         rts
 
 L223F:  jsr     L238A
-        lda     $BF91
+        lda     DATELO+1
         ror     a
-        lda     $BF90
+        lda     DATELO
         rol     a
         rol     a
         rol     a
@@ -310,10 +310,10 @@ L223F:  jsr     L238A
         cmp     #$0D
         bcs     L2264
         sta     $0A
-        lda     $BF93
+        lda     TIMELO+1
         cmp     #$18
         bcs     L2264
-        lda     $BF92
+        lda     TIMELO
         cmp     #$3C
 L2264:  rts
 
@@ -371,19 +371,19 @@ L22B0:
 L22B1           := * + 1
 L22B2           := * + 2
         ldy     L22DB,x
-        sta     $BF30,y
+        sta     $BF30,y         ; Modifying DEVLST ???
         dex
         dex
         bne     L22A3
 L22BA:  lda     $0200
         asl     a
         and     #$E0
-        ora     $BF90
-        sta     $BF90
+        ora     DATELO
+        sta     DATELO
 L22C7           := * + 1
         lda     #$56
         rol     a
-        sta     $BF91
+        sta     DATELO+1
         ldy     #$01
 L22CE:  lda     $0208,y
         ora     #$B0
@@ -575,9 +575,9 @@ L2415:  lda     ($00),y
         bne     L2415
         jsr     L114F
         lda     #$00
-        sta     $22
+        sta     WNDTOP
         lda     #$18
-        sta     $23
+        sta     WNDBTM
         jsr     MON_HOME
         lda     $09
         beq     L2443
@@ -646,21 +646,20 @@ L24B7:  rts
         lda     #$07
         sta     $11F9
         ldy     #$03
-L24BF:  lda     $BF90,y
+L24BF:  lda     DATELO,y
         sta     $1203,y
         dey
         bpl     L24BF
         lda     #OPC_RTS
         sta     DATETIME
-        PRODOS_CALL $C3, $11F9
-        .byte   $D0
-        asl     $A9
-        jmp     L068D
+        PRODOS_CALL MLI_SET_FILE_INFO, $11F9
+        bne     :+
 
-        .byte   $BF
+        lda     #OPC_JMP_abs
+        sta     DATETIME
         rts
 
-        cmp     #$2B
+:       cmp     #$2B
         bne     L2546
         ldy     #$0B
         jsr     L10EF
@@ -668,47 +667,44 @@ L24BF:  lda     $BF90,y
         jsr     RDKEY
         jmp     L111A
 
-        PRODOS_CALL $C8, $11E9
+        PRODOS_CALL MLI_OPEN, $11E9
         bne     L2546
         lda     $11EE
         sta     $11F0
 
-        PRODOS_CALL $CA, $11EF
-        .byte   $D0
-        .byte   $43
+        PRODOS_CALL MLI_READ, $11EF
+        bne     L2546
 
-        PRODOS_CALL $CC, $11F7
+        PRODOS_CALL MLI_CLOSE, $11F7
         bne     L2546
         rts
 
-        lda     $BF30
+        lda     DEVNUM
         sta     $11DD
         sta     $11E4
 
-        PRODOS_CALL $C5, $11DC
-        .byte   $D0
-        and     #$AD
-        .byte   $0C
-        .byte   $12
+        PRODOS_CALL MLI_ON_LINE, $11DC
+        bne     L2546
+
+        lda     $120C
         and     #$0F
         tay
         iny
         sty     $120B
-        lda     #$2F
+        lda     #'/'
         sta     $120C
 
-        PRODOS_CALL $C6, $11E0
-        .byte   $D0
-        .byte   $12
+        PRODOS_CALL MLI_SET_PREFIX, $11E0
+        bne     L2546
 
-        PRODOS_CALL $C4, $11F9
-        .byte   $D0
-        asl     a
+        PRODOS_CALL MLI_GET_FILE_INFO, $11F9
+        bne     L2546
         rts
 
-        PRODOS_CALL $80, $11E3
-        .byte   $D0
-        ora     ($60,x)
+        PRODOS_CALL MLI_READ_BLOCK, $11E3
+        bne     L2546
+        rts
+
 L2546:  ldy     #$02
         sty     $0B
         jsr     L10EF
