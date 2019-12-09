@@ -4,7 +4,23 @@
         .feature string_escapes
 
         .org $2000
-        .setcpu "6502"
+        .setcpu "65C02"
+
+.enum MessageCode
+        kInstall            =  0
+        kNoSysFile          =  1
+        kDiskError          =  2
+        kIIc                =  3
+        kIIe                =  4
+        kCurrentYear        =  5
+        kOkPrompt           =  6
+        kNoClock            =  7
+        kRunning            =  8
+        kSeikoIIc           =  9
+        kSeikoIIe           = 10
+        kRemoveWriteProtect = 11
+.endenum
+
 
 SLOT3_FIRMWARE           := $C300
 
@@ -26,45 +42,58 @@ kClockRoutineMaxLength = 125    ; Per ProDOS 8 TRM
 L2000:
 L2001           := * + 1
         lda     #$06
-L2003           := * + 1
+L2003           := * + 1        ; Patched location for ...?
         lda     #$A0
         cmp     #$CC
         bne     L2013
+
         sta     L239E + (L1272 - L1000) ; In relocated code
         lda     #$5C
         sta     L2285
         sta     L2336
-L2013:  ldx     #$FF
+L2013:
+        ;; Clear stack
+        ldx     #$FF
         txs
-        lda     #$00
+
+        ;; Clear interpreter version
+        ;; TODO: Remove this
+        lda     #0
         sta     IBAKVER
         sta     IVERSION
+
+        ;; Trash reset vector to cause reboot
         sta     ROMIN2
         lda     $03F3
         eor     #$FF
         sta     $03F4
+
+        ;; Identify machine type
         ldy     #$00
         ldx     #$00
         lda     MACHID
         and     #%10001000      ; IIe or later, modifier
         beq     L2035
         inx
-L2035:  cmp     #$88
-        beq     L2041
+L2035:  cmp     #%10001000      ; IIc ?
+        beq     is_iic
         lda     L2003
         cmp     #$CC
-        beq     L2041
+        beq     is_iic
         iny
-L2041:  sty     $07
+is_iic: sty     $07
         lda     L239C,x
         sta     $08
+
+
+        ;; Check 40/80 columns; wrap strings if 40 columns.
         lda     MACHID
         and     #%00000010      ; 80 Column card?
         lsr     a
         sta     $09
-        bne     L206B
+        bne     init_80_col
 
-        lda     #$8D
+        lda     #CR|$80
 
         ;; Convert spaces to newlines if 40 Columns
         sta     chain + (wrap1 - L1000)
@@ -75,19 +104,21 @@ L2041:  sty     $07
 
         inc     L2095
         inc     L2099
-        bne     L206E
+        bne     :+
 
-L206B:  jsr     SLOT3_FIRMWARE
-
+init_80_col:
+        jsr     SLOT3_FIRMWARE
+:
 
         ;; --------------------------------------------------
-
         ;; Copy to $1000
 
-L206E:  ldy     #0
+.proc RelocateChainingCode
+        ldy     #0
 
         ;; End signature is two adjacent $FFs
-L2070:
+loop:
+
 L2072           := * + 2
         lda     L239E,y
         cmp     #$FF
@@ -101,16 +132,19 @@ L207E:
 L2080           := * + 2
         sta     L1000,y
         iny
-        bne     L2070
+        bne     loop
 
         inc     L2072
         inc     L2079
         inc     L2080
 
-        bne     L2070           ; always
+        bne     loop            ; always
+.endproc
 
-L208F:  ldy     #$00
-        jsr     L10EF
+
+L208F:  ldy     #MessageCode::kInstall
+        jsr     ShowMessage
+
 L2095           := * + 1
         ldy     #$03
         sty     $22
@@ -122,7 +156,7 @@ L2099           := * + 1
         lsr     a
         sta     L22C7
         jsr     L222B
-        sta     L11FF
+        sta     year
         ldx     DEVCNT
 L20AF:  lda     DEVLST,x
         and     #$0F
@@ -172,7 +206,7 @@ apply_patch:
         sta     L2269,x
         iny
         inx
-        cpx     #$38
+        cpx     #kPatchLength
         bne     :-
 
 L20FE:  lda     #$02
@@ -182,8 +216,10 @@ L2103:  jsr     L223F
         dec     L210F
         bpl     L2103
         bmi     L2156
-L210F:  brk
-L2110:  brk
+
+L210F:  .byte   0
+L2110:  .byte   0
+
 L2111:  lda     $07
         bne     L2135
         lda     L2110
@@ -199,22 +235,26 @@ L2111:  lda     $07
         beq     L20FE
         sty     L229F
         bne     L20FE
-L2135:  ldy     #$07
+
+L2135:  ldy     #MessageCode::kNoClock
         sty     $0B
-        lda     MACHID
+        lda     MACHID          ; Check for clock card
         ror     a
-        bcc     L2145
+        bcc     no_clock        ; Bit 0 = 0 means no clock card
+
         jsr     MON_HOME
         jmp     L1000
 
-        ;; --------------------------------------------------
-
-L2145:  lda     #0
+no_clock:
+        lda     #0
         sta     DATELO
         sta     DATELO+1
         sta     TIMELO
         sta     TIMELO+1
-        jmp     L11AA
+        jmp     ShowMessageAndMaybeChain
+
+        ;; --------------------------------------------------
+
 
 L2156:  lda     #OPC_JMP_abs
         sta     DATETIME
@@ -243,32 +283,42 @@ L218C:  bit     KBDSTRB
         lda     #$03
         cmp     $0A
         ror     L11FE
-L2199:  ldy     #$05
-        jsr     L10EF
-        lda     L11FF
+
+        ;; Show current year prompt
+L2199:  ldy     #MessageCode::kCurrentYear
+        jsr     ShowMessage
+
+        lda     year           ; 2-digit year
         jsr     PRBYTE
-        ldy     #$06
-        jsr     L10EF
-L21A9:  jsr     RDKEY
-        and     #$DF
-        cmp     #$D9
+
+        ldy     #MessageCode::kOkPrompt
+        jsr     ShowMessage
+
+        ;; Wait for keypress
+:       jsr     RDKEY
+        and     #%11011111      ; lowercase --> uppercase
+        cmp     #'Y'|$80
         beq     L21D3
-        cmp     #$CE
-        bne     L21A9
-        ldy     #$05
-        jsr     L10EF
-        jsr     L238E
+        cmp     #'N'|$80
+        bne     :-
+
+        ;; Prompt for two digit year
+        ldy     #MessageCode::kCurrentYear
+        jsr     ShowMessage
+        jsr     GetDigitKey     ; Decade
         asl     a
         asl     a
         asl     a
         asl     a
-        sta     L11FF
-        jsr     L238E
+        sta     year
+        jsr     GetDigitKey     ; Year
         and     #$0F
-        ora     L11FF
-        sta     L11FF
+        ora     year
+        sta     year
+
         jmp     L2199
 
+        ;; Current year is okay
 L21D3:  lda     $1204
         jsr     L2210
         jsr     L238A
@@ -300,7 +350,7 @@ install_ptr := * + 1
         ;; Chain
         jmp     L1000
 
-L2210:  lda     L11FF
+L2210:  lda     year
         pha
         lsr     a
         lsr     a
@@ -366,10 +416,10 @@ Driver: cld
 L2269:
 L226A           := * + 1
         lda     PORT2_ACIA_COMMAND
-        pha
+        pha                     ; Save command register
         ldy     #$03
         ldx     #$16
-        lda     #$08
+        lda     #%00001000
 L2273:
 L2274           := * + 1
         sta     PORT2_ACIA_COMMAND
@@ -384,7 +434,7 @@ L2276:  dex
 L2284:
 L2285           := * + 1
         lda     #$5D
-L2286:  .byte   $3A
+L2286:  dec                     ; 65C02
         bne     L2286
 L2289:
 L228A           := * + 1
@@ -399,7 +449,8 @@ L228A           := * + 1
         ldy     #$04
         dex
         bpl     L2284
-        pla
+
+        pla                     ; Restore command register
 L229F           := * + 1
         sta     PORT2_ACIA_COMMAND
         ldx     #$06
@@ -496,7 +547,7 @@ patch2:
         nop
         ldy     #$03
         ldx     #$16
-        lda     #$02
+        lda     #%00000010
 L2324:  sta     PORT2_ACIA_COMMAND
 L2327:  dex
         bne     L2327
@@ -509,7 +560,7 @@ L2327:  dex
 L2335:
 L2336           := * + 1
         lda     #$5D
-L2337:  .byte   $3A
+L2337:  dec                     ; 65C02
         bne     L2337
 L233A:  lda     PORT2_ACIA_STATUS
         eor     #$20
@@ -572,12 +623,20 @@ L236B:  lda     MOUSE_BTN
 L238A:  jsr     Driver
         rts
 
-L238E:  jsr     RDKEY
+;;; ------------------------------------------------------------
+
+;;; Prompt, loop until digit key is pressed
+
+.proc GetDigitKey
+        jsr     RDKEY
         cmp     #'0' | $80
-        bcc     L238E
+        bcc     GetDigitKey
         cmp     #('9'+1) | $80
-        bcs     L238E
+        bcs     GetDigitKey
         jmp     COUT
+.endproc
+
+;;; ------------------------------------------------------------
 
 L239C:  .byte   $DF
         .byte   $FF
@@ -647,9 +706,9 @@ L1053:  lda     $05
         lda     $07
         beq     L106D
         iny
-L106D:  jsr     L10EF
-L1070:  ldy     #$08
-        jsr     L10EF
+L106D:  jsr     ShowMessage
+L1070:  ldy     #MessageCode::kRunning
+        jsr     ShowMessage
         ldy     #$01
 L1077:  lda     ($00),y
         sta     $121D,y
@@ -688,13 +747,13 @@ L10A8:  clc
         sty     L11E7
         lda     $1C03
         sta     L11E8
-        bne     L10D3
+        bne     :+
         tya
-        bne     L10D3
-        ldy     #$01
-        jmp     L11AA
+        bne     :+
+        ldy     #MessageCode::kNoSysFile
+        jmp     ShowMessageAndMaybeChain
 
-L10D3:  jsr     L119F
+:       jsr     L119F
         lda     #$00
         sta     $04
         lda     #$04
@@ -709,9 +768,13 @@ L10E5:  lda     L11FE
         ldy     #$09
 L10EE:  rts
 
-L10EF:  lda     $1242,y
+;;; ------------------------------------------------------------
+;;; Call with message number in Y
+
+.proc ShowMessage
+        lda     message_table_lo,y
         sta     L1109
-        lda     L124E,y
+        lda     message_table_hi,y
         sta     L1109+1
         cpy     #$06
         beq     L1106
@@ -731,6 +794,9 @@ L1113:  jsr     COUT
         iny
         bne     L1108
 L1119:  rts
+.endproc
+
+;;; ------------------------------------------------------------
 
 L111A:  lda     #$07
         sta     L11F9
@@ -749,23 +815,23 @@ L1121:  lda     DATELO,y
         rts
 
 :       cmp     #$2B
-        bne     L11A8
-        ldy     #$0B
-        jsr     L10EF
+        bne     ShowDiskErrorAndChain
+        ldy     #MessageCode::kRemoveWriteProtect
+        jsr     ShowMessage
         jsr     L11C3
         jsr     RDKEY
         jmp     L111A
 
 L114F:  PRODOS_CALL MLI_OPEN, $11E9
-        bne     L11A8
+        bne     ShowDiskErrorAndChain
         lda     L11EE
         sta     L11F0
 
         PRODOS_CALL MLI_READ, $11EF
-        bne     L11A8
+        bne     ShowDiskErrorAndChain
 
         PRODOS_CALL MLI_CLOSE, $11F7
-        bne     L11A8
+        bne     ShowDiskErrorAndChain
         rts
 
 L116E:  lda     DEVNUM
@@ -773,7 +839,7 @@ L116E:  lda     DEVNUM
         sta     L11E4
 
         PRODOS_CALL MLI_ON_LINE, $11DC
-        bne     L11A8
+        bne     ShowDiskErrorAndChain
 
         lda     $120C
         and     #$0F
@@ -784,28 +850,41 @@ L116E:  lda     DEVNUM
         sta     $120C
 
         PRODOS_CALL MLI_SET_PREFIX, $11E0
-        bne     L11A8
+        bne     ShowDiskErrorAndChain
 
         PRODOS_CALL MLI_GET_FILE_INFO, L11F9
-        bne     L11A8
+        bne     ShowDiskErrorAndChain
         rts
 
 L119F:  PRODOS_CALL MLI_READ_BLOCK, $11E3
-        bne     L11A8
+        bne     ShowDiskErrorAndChain
         rts
 
-L11A8:  ldy     #$02
-L11AA:  sty     $0B
-        jsr     L10EF
+;;; ------------------------------------------------------------
+
+.proc ShowDiskErrorAndChain
+        ldy     #MessageCode::kDiskError
+        ;; fall through
+.endproc
+
+;;; Show message and chain to next system file, unless
+;;; kNoClock (in which case: hang)
+
+.proc ShowMessageAndMaybeChain
+        sty     $0B
+        jsr     ShowMessage
         jsr     L11C3
         lda     $0B
-        cmp     #$07
-        bne     L11C0
+        cmp     #MessageCode::kNoClock
+        bne     loop
         lda     #OPC_RTS
         sta     DATETIME
         jmp     L1000
 
-L11C0:  jmp     L11C0
+loop:   jmp     loop           ; Infinite loop!
+.endproc
+
+;;; ------------------------------------------------------------
 
 L11C3:  lda     #$20
         sta     $0C
@@ -818,6 +897,8 @@ L11C7:  lda     #$02
         dec     $0C
         bne     L11C7
         rts
+
+        ;; MLI call params
 
         .byte   $02
 L11DD:  .byte   $60
@@ -843,7 +924,9 @@ L11F9:  .byte   $0A
 L11FC:  .byte   0
 L11FD:  .byte   0
 L11FE:  .byte   0
-L11FF:  .byte   0
+
+year:   .byte   0               ; 2-digit
+
         .res 46, 0
 
 str_system:
@@ -854,37 +937,56 @@ str_clock_system:
         PASCAL_STRING "CLOCK.SYSTEM"
         strlen_str_clock_system = .strlen("CLOCK.SYSTEM")
 
-        .byte   $5A,$AC,$08,$30,$4D,$64,$77,$87
-        .byte   $AA,$2A,$47,$CD
-L124E:  .byte   $12,$12,$13,$13
-        .byte   $13,$13,$13,$13,$13,$13,$13,$12
+message_table_lo:
+        .byte   <msgInstall,<msgNoSysFile,<msgDiskError,<msgIIc
+        .byte   <msgIIe,<msgCurrentYear,<msgOkPrompt,<msgNoClock
+        .byte   <msgRunning,<msgSeikoIIc,<msgSeikoIIe,<msgRemoveWriteProtect
 
+message_table_hi:
+        .byte   >msgInstall,>msgNoSysFile,>msgDiskError,>msgIIc
+        .byte   >msgIIe,>msgCurrentYear,>msgOkPrompt,>msgNoClock
+        .byte   >msgRunning,>msgSeikoIIc,>msgSeikoIIe,>msgRemoveWriteProtect
+
+msgInstall:
         HIASCII "Install Clock Driver 1.5"
-
-L1272:  .byte   $A0
-
+L1272:  HIASCII " "             ; Modified at launch
         HIASCII "\rCopyright (c) 1986 "
         wrap1 := *-1
         HIASCIIZ "Creative Peripherals Unlimited, Inc."
 
+msgNoSysFile:
         HIASCIIZ "Unable to find a '.SYSTEM' file!"
 
+msgRemoveWriteProtect:
         HIASCII "Remove Write-Protect tab, "
         wrap2 := *-1
         HIASCIIZ "Replace disk, and Press a key..."
 
+msgDiskError:
         HIASCIIZ "Disk error! Unable to continue!!!"
-        HIASCIIZ "Seiko //c driver installed. "
+
+msgSeikoIIc:
+        HIASCII "Seiko "
+msgIIc: HIASCIIZ "//c driver installed. "
         wrap4 := *-2
 
-        HIASCIIZ "Seiko //e driver installed. "
+msgSeikoIIe:
+        HIASCII "Seiko "
+msgIIe: HIASCIIZ "//e driver installed. "
         wrap5 := *-2
 
-        HIASCII  "Current year is 19"
-        .byte    0, $AE
+msgCurrentYear:
+        HIASCIIZ  "Current year is 19"
+
+msgOkPrompt:
+        HIASCII "."
         wrap3 := *
         HIASCIIZ "    OK? (Y/N) "
+
+msgNoClock:
         HIASCIIZ "No clock! Driver not installed...\r"
+
+msgRunning:
         HIASCIIZ "Running "
 
         ;; Signature for end of range to copy to $1000
