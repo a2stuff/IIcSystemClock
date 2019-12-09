@@ -21,6 +21,12 @@
         kRemoveWriteProtect = 11
 .endenum
 
+mach_type := $07                ; 0 = IIc, 1 = II+/IIe
+case_mask := $08                ; mask with chars before COUT
+has_80col := $09                ; 1 = has 80 column card
+month     := $0A                ; month from current date
+msg_num   := $0B                ; stashed message number
+
 
 SLOT3_FIRMWARE           := $C300
 
@@ -69,33 +75,34 @@ L2013:
         sta     $03F4
 
         ;; Identify machine type
-        ldy     #$00
-        ldx     #$00
+        ldy     #0
+        ldx     #0
         lda     MACHID
-        and     #%10001000      ; IIe or later, modifier
-        beq     L2035
-        inx
-L2035:  cmp     #%10001000      ; IIc ?
+        and     #%10001000      ; =0 if II+, >0 if IIe/IIc
+        beq     :+
+        inx                     ; Not a II+
+
+:       cmp     #%10001000      ; IIc ?
         beq     is_iic
-        lda     L2003
+        lda     L2003           ; Hack ???
         cmp     #$CC
         beq     is_iic
-        iny
-is_iic: sty     $07
-        lda     L239C,x
-        sta     $08
+        iny                     ; Not a IIc
+is_iic: sty     mach_type
 
+        ;; Set case mask (II+ vs. IIe/IIc)
+        lda     case_mask_table,x
+        sta     case_mask
 
         ;; Check 40/80 columns; wrap strings if 40 columns.
         lda     MACHID
         and     #%00000010      ; 80 Column card?
         lsr     a
-        sta     $09
+        sta     has_80col
         bne     init_80_col
 
-        lda     #CR|$80
-
         ;; Convert spaces to newlines if 40 Columns
+        lda     #CR|$80
         sta     chain + (wrap1 - L1000)
         sta     chain + (wrap4 - L1000)
         sta     chain + (wrap5 - L1000)
@@ -151,12 +158,14 @@ L2095           := * + 1
 L2099           := * + 1
         ldy     #$05
         sty     $23
-        jsr     L116E
+        jsr     SetPrefixAndCheckSysFile
         lda     $1204
         lsr     a
         sta     L22C7
         jsr     L222B
-        sta     year
+        sta     bcd_year
+
+        ;; Search device list for... ???
         ldx     DEVCNT
 L20AF:  lda     DEVLST,x
         and     #$0F
@@ -173,11 +182,6 @@ L20C2:  asl     a
         asl     a
         bne     L20CB
 
-kPatchLength = $38
-kPatch1Offset = $0
-kPatch2Offset = $38
-kPatch3Offset = $70
-
 
 L20C8:  lda     DEVLST,x
 L20CB:  and     #%01110000      ; slot
@@ -188,17 +192,26 @@ L20CB:  and     #%01110000      ; slot
         beq     L20E3
         cmp     #$02
         bcs     L20FE
-        lda     $07
-        bne     L20EE
-        beq     L20FE
+        lda     mach_type
+        bne     not_iic
+        beq     L20FE           ; always
+
+;;; ------------------------------------------------------------
+
+kPatchLength = $38
+kPatch1Offset = $0
+kPatch2Offset = $38
+kPatch3Offset = $70
+
 L20E3:  ldy     #kPatch2Offset
-        lda     $07
-        beq     apply_patch
+        lda     mach_type
+        beq     apply_patch     ; if IIc
         ldy     #kPatch1Offset
         jmp     apply_patch
 
         ;; Patch bytes on top of driver
-L20EE:  ldy     #kPatch3Offset
+not_iic:
+        ldy     #kPatch3Offset
 
 apply_patch:
         ldx     #$00
@@ -211,7 +224,7 @@ apply_patch:
 
 L20FE:  lda     #$02
         sta     L210F
-L2103:  jsr     L223F
+L2103:  jsr     CalcMonthValidateDateTime
         bcs     L2111
         dec     L210F
         bpl     L2103
@@ -220,8 +233,8 @@ L2103:  jsr     L223F
 L210F:  .byte   0
 L2110:  .byte   0
 
-L2111:  lda     $07
-        bne     L2135
+L2111:  lda     mach_type
+        bne     L2135           ; not IIc
         lda     L2110
         bne     L2135
         inc     L2110
@@ -237,7 +250,7 @@ L2111:  lda     $07
         bne     L20FE
 
 L2135:  ldy     #MessageCode::kNoClock
-        sty     $0B
+        sty     msg_num
         lda     MACHID          ; Check for clock card
         ror     a
         bcc     no_clock        ; Bit 0 = 0 means no clock card
@@ -263,7 +276,7 @@ L2156:  lda     #OPC_JMP_abs
         sta     MACHID
         bit     KBD
         bmi     L218C
-        lda     $0A
+        lda     month
         cmp     #$0B
         bcc     L2176
         bit     L11FE
@@ -281,14 +294,14 @@ L2176:  lda     $1204
 L218C:  bit     KBDSTRB
         rol     L11FE
         lda     #$03
-        cmp     $0A
+        cmp     month
         ror     L11FE
 
         ;; Show current year prompt
 L2199:  ldy     #MessageCode::kCurrentYear
         jsr     ShowMessage
 
-        lda     year           ; 2-digit year
+        lda     bcd_year           ; 2-digit year
         jsr     PRBYTE
 
         ldy     #MessageCode::kOkPrompt
@@ -310,18 +323,18 @@ L2199:  ldy     #MessageCode::kCurrentYear
         asl     a
         asl     a
         asl     a
-        sta     year
+        sta     bcd_year
         jsr     GetDigitKey     ; Year
         and     #$0F
-        ora     year
-        sta     year
+        ora     bcd_year
+        sta     bcd_year
 
         jmp     L2199
 
         ;; Current year is okay
 L21D3:  lda     $1204
         jsr     L2210
-        jsr     L238A
+        jsr     InvokeDriver
         jsr     L111A
 L21DF:  lda     RWRAM1
         lda     RWRAM1
@@ -350,7 +363,7 @@ install_ptr := * + 1
         ;; Chain
         jmp     L1000
 
-L2210:  lda     year
+L2210:  lda     bcd_year
         pha
         lsr     a
         lsr     a
@@ -369,12 +382,13 @@ L2210:  lda     year
         sta     L22C7
         rts
 
-L222B:  ldx     #$FF
-L222D:  inx
+.proc L222B
+        ldx     #$FF
+:       inx
         sec
-        sbc     #$0A
-        bcs     L222D
-        adc     #$0A
+        sbc     #10
+        bcs     :-
+        adc     #10
         sta     $06
         txa
         asl     a
@@ -383,8 +397,16 @@ L222D:  inx
         asl     a
         ora     $06
         rts
+.endproc
 
-L223F:  jsr     L238A
+;;; ------------------------------------------------------------
+
+;;; Returns with carry set if date is not valid.
+
+.proc CalcMonthValidateDateTime
+        jsr     InvokeDriver
+
+        ;; Check month
         lda     DATELO+1
         ror     a
         lda     DATELO
@@ -394,16 +416,24 @@ L223F:  jsr     L238A
         rol     a
         and     #$0F
         sec
-        beq     L2264
-        cmp     #$0D
-        bcs     L2264
-        sta     $0A
+        beq     done            ; Month = 0 is failure
+
+        cmp     #13
+        bcs     done            ; Month >= 13 is failure
+
+        sta     month
+
+        ;; Check hour
         lda     TIMELO+1
-        cmp     #$18
-        bcs     L2264
+        cmp     #24
+        bcs     done            ; Hour >= 24 is failure
+
+        ;; Check minute
         lda     TIMELO
-        cmp     #$3C
-L2264:  rts
+        cmp     #60             ; Min >= 60 is failure
+
+done:   rts
+.endproc
 
 ;;; ============================================================
 ;;; Clock Driver (Relocatable)
@@ -425,7 +455,7 @@ L2274           := * + 1
         sta     PORT2_ACIA_COMMAND
 L2276:  dex
         bne     L2276
-        eor     #$0A
+        eor     #%00001010
         ldx     #$09
         dey
         bne     L2273
@@ -620,8 +650,10 @@ L236B:  lda     MOUSE_BTN
 ;;; ============================================================
 
 
-L238A:  jsr     Driver
+.proc InvokeDriver
+        jsr     Driver
         rts
+.endproc
 
 ;;; ------------------------------------------------------------
 
@@ -638,8 +670,9 @@ L238A:  jsr     Driver
 
 ;;; ------------------------------------------------------------
 
-L239C:  .byte   $DF
-        .byte   $FF
+case_mask_table:
+        .byte   %11011111       ; map lowercase to uppercase
+        .byte   %11111111       ; preserve case
 
 
 chain:
@@ -698,12 +731,12 @@ L1053:  lda     $05
         sta     $121D
         sta     $0280
         inc     $05
-        lda     $0B
+        lda     msg_num
         cmp     #$07
         beq     L1070
         ldy     #$03
         jsr     L10E5
-        lda     $07
+        lda     mach_type
         beq     L106D
         iny
 L106D:  jsr     ShowMessage
@@ -718,13 +751,13 @@ L1077:  lda     ($00),y
         iny
         cpy     $05
         bne     L1077
-        jsr     L114F
+        jsr     LoadSysFile
         lda     #$00
         sta     WNDTOP
         lda     #$18
         sta     WNDBTM
         jsr     MON_HOME
-        lda     $09
+        lda     has_80col
         beq     L10A5
         lda     #$15
         jsr     COUT
@@ -769,31 +802,33 @@ L10E5:  lda     L11FE
 L10EE:  rts
 
 ;;; ------------------------------------------------------------
-;;; Call with message number in Y
+;;; Call with message number in Y.
+;;; Clears screen unless kOkPromptor or kRunning.
 
 .proc ShowMessage
         lda     message_table_lo,y
-        sta     L1109
+        sta     ptr
         lda     message_table_hi,y
-        sta     L1109+1
-        cpy     #$06
-        beq     L1106
-        cpy     #$08
-        beq     L1106
+        sta     ptr+1
+
+        cpy     #MessageCode::kOkPrompt
+        beq     :+
+        cpy     #MessageCode::kRunning
+        beq     :+
         jsr     MON_HOME
-L1106:  ldy     #$00
+:       ldy     #0
 
-        L1109 := *+1
-
-L1108:  lda     $F000,y
-        beq     L1119
-        cmp     #$E0
-        bcc     L1113
-        and     $08
-L1113:  jsr     COUT
+        ptr := *+1
+loop:   lda     $F000,y
+        beq     done
+        cmp     #'`'|$80        ; Not lower case?
+        bcc     :+
+        and     case_mask
+:       jsr     COUT
         iny
-        bne     L1108
-L1119:  rts
+        bne     loop
+
+done:   rts
 .endproc
 
 ;;; ------------------------------------------------------------
@@ -822,7 +857,10 @@ L1121:  lda     DATELO,y
         jsr     RDKEY
         jmp     L111A
 
-L114F:  PRODOS_CALL MLI_OPEN, open_params
+;;; ------------------------------------------------------------
+
+.proc LoadSysFile
+        PRODOS_CALL MLI_OPEN, open_params
         bne     ShowDiskErrorAndChain
         lda     open_params_ref_num
         sta     read_params_ref_num
@@ -833,8 +871,12 @@ L114F:  PRODOS_CALL MLI_OPEN, open_params
         PRODOS_CALL MLI_CLOSE, close_params
         bne     ShowDiskErrorAndChain
         rts
+.endproc
 
-L116E:  lda     DEVNUM
+;;; ------------------------------------------------------------
+
+.proc SetPrefixAndCheckSysFile
+        lda     DEVNUM          ; Most recently accessed device
         sta     on_line_unit_num
         sta     read_block_unit_num
 
@@ -855,6 +897,9 @@ L116E:  lda     DEVNUM
         PRODOS_CALL MLI_GET_FILE_INFO, file_info_params
         bne     ShowDiskErrorAndChain
         rts
+.endproc
+
+;;; ------------------------------------------------------------
 
 L119F:  PRODOS_CALL MLI_READ_BLOCK, read_block_params
         bne     ShowDiskErrorAndChain
@@ -871,10 +916,10 @@ L119F:  PRODOS_CALL MLI_READ_BLOCK, read_block_params
 ;;; kNoClock (in which case: hang)
 
 .proc ShowMessageAndMaybeChain
-        sty     $0B
+        sty     msg_num
         jsr     ShowMessage
         jsr     L11C3
-        lda     $0B
+        lda     msg_num
         cmp     #MessageCode::kNoClock
         bne     loop
         lda     #OPC_RTS
@@ -949,7 +994,7 @@ file_info_params:
 ;;; Misc variables
 
 L11FE:  .byte   0               ; ???
-year:   .byte   0               ; 2-digit (shared)
+bcd_year:   .byte   0           ; 2-digit (shared)
 
 L1200:
         ;; buffer for variables, filename
