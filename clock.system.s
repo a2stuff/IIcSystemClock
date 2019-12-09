@@ -21,6 +21,8 @@ X0EDGE2         := $C05D
 
 MOUSE_BTN          := $C063
 
+kClockRoutineMaxLength = 125    ; Per ProDOS 8 TRM
+
 L2000:
 L2001           := * + 1
         lda     #$06
@@ -137,6 +139,11 @@ L20C2:  asl     a
         asl     a
         bne     L20CB
 
+kPatchLength = $38
+kPatch1Offset = $0
+kPatch2Offset = $38
+kPatch3Offset = $70
+
 
 L20C8:  lda     DEVLST,x
 L20CB:  and     #%01110000      ; slot
@@ -150,21 +157,23 @@ L20CB:  and     #%01110000      ; slot
         lda     $07
         bne     L20EE
         beq     L20FE
-L20E3:  ldy     #$38            ; offset into patch #1
+L20E3:  ldy     #kPatch2Offset
         lda     $07
-        beq     L20F0
-        ldy     #$00            ; offset into patch #2
-        jmp     L20F0
+        beq     apply_patch
+        ldy     #kPatch1Offset
+        jmp     apply_patch
 
         ;; Patch bytes on top of driver
-L20EE:  ldy     #$70            ; offset into patch #3
-L20F0:  ldx     #$00
-L20F2:  lda     L22E2,y
+L20EE:  ldy     #kPatch3Offset
+
+apply_patch:
+        ldx     #$00
+:       lda     Patches,y
         sta     L2269,x
         iny
         inx
         cpx     #$38
-        bne     L20F2
+        bne     :-
 
 L20FE:  lda     #$02
         sta     L210F
@@ -200,7 +209,7 @@ L2135:  ldy     #$07
 
         ;; --------------------------------------------------
 
-L2145:  lda     #$00
+L2145:  lda     #0
         sta     DATELO
         sta     DATELO+1
         sta     TIMELO
@@ -267,26 +276,28 @@ L21D3:  lda     $1204
 L21DF:  lda     RWRAM1
         lda     RWRAM1
         lda     DATETIME+1
-        sta     L2202
+        sta     install_ptr
         clc
         adc     #$76
         sta     L22B1
         lda     DATETIME+2
-        sta     L2203
+        sta     install_ptr+1
         adc     #0
         sta     L22B2
 
         ;; Relocate clock driver
-
-        ldy     #$7C
-L21FE:  lda     L2265,y
-L2202           := * + 1
-L2203           := * + 2
+        ldy     #kClockRoutineMaxLength - 1
+:       lda     Driver,y
+install_ptr := * + 1
         sta     $F000,y
         dey
-        bpl     L21FE
+        bpl     :-
+
+        ;; Initialize the time (via driver)
         jsr     DATETIME
         lda     ROMIN2
+
+        ;; Chain
         jmp     L1000
 
 L2210:  lda     L11FF
@@ -348,8 +359,8 @@ L2264:  rts
 ;;; Clock Driver (Relocatable)
 ;;; ============================================================
 
-L2265:  cld
-        cld
+Driver: cld
+        cld                     ; TODO: Remove duplicate CLD
         php
         sei
 L2269:
@@ -392,12 +403,13 @@ L228A           := * + 1
 L229F           := * + 1
         sta     PORT2_ACIA_COMMAND
         ldx     #$06
+
 L22A3:  lda     $0201,x
-L22A6:  dec     $0200,x
+:       dec     $0200,x
         bmi     L22B0
         clc
-        adc     #$0A
-        bcc     L22A6
+        adc     #10
+        bcc     :-
 L22B0:
 L22B1           := * + 1
 L22B2           := * + 2
@@ -406,6 +418,7 @@ L22B2           := * + 2
         dex
         dex
         bne     L22A3
+
 L22BA:  lda     $0200
         asl     a
         and     #$E0
@@ -438,9 +451,10 @@ L22DB           := * + 1
 
         ;; Patches applied to driver (length $38, at offset 0)
 
+Patches:
+
         ;; Patch #1
 patch1:
-L22E2:
 L22E3           := * + 1
         lda     $C0E0           ; Set to $C0x0, n=slot+8
         lda     DISVBL
@@ -471,12 +485,12 @@ L2307:  lda     MOUSE_BTN
         ldy     #$04
         dex
         bpl     L2300
-        .assert * - patch1 = $38, error, "Patch length"
+        .assert * - patch1 = kPatchLength, error, "Patch length"
 
         ;; --------------------------------------------------
         ;; Patch #2
 patch2:
-        .assert * - $38 = L22E2, error, "Offset changed"
+        .assert * = Patches + kPatch2Offset, error, "Offset changed"
 
         lda     PORT2_ACIA_COMMAND
         nop
@@ -513,12 +527,12 @@ L233A:  lda     PORT2_ACIA_STATUS
         nop
         nop
 
-        .assert * - patch2 = $38, error, "Patch length"
+        .assert * - patch2 = kPatchLength, error, "Patch length"
 
         ;; --------------------------------------------------
         ;; Patch #3
 patch3:
-        .assert * - $70 = L22E2, error, "Offset changed"
+        .assert * = Patches + kPatch3Offset, error, "Offset changed"
 
         lda     ENVBL
         sta     ENBXY
@@ -550,12 +564,12 @@ L236B:  lda     MOUSE_BTN
         dex
         bpl     L2369
         lda     DISVBL
-        .assert * - patch3 = $38, error, "Patch length"
+        .assert * - patch3 = kPatchLength, error, "Patch length"
 
 ;;; ============================================================
 
 
-L238A:  jsr     L2265
+L238A:  jsr     Driver
         rts
 
 L238E:  jsr     RDKEY
