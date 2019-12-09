@@ -654,11 +654,11 @@ L239E:
 
 L1000:
         ldy     #$00
-        sty     L11E8
+        sty     read_block_block_num+1
         iny
         sty     $04
         iny
-        sty     L11E7
+        sty     read_block_block_num
         jsr     L119F
         lda     $1C23
         sta     $02
@@ -744,9 +744,9 @@ L10A8:  clc
         cmp     $03
         bne     L10E2
         ldy     $1C02
-        sty     L11E7
+        sty     read_block_block_num
         lda     $1C03
-        sta     L11E8
+        sta     read_block_block_num+1
         bne     :+
         tya
         bne     :+
@@ -798,8 +798,8 @@ L1119:  rts
 
 ;;; ------------------------------------------------------------
 
-L111A:  lda     #$07
-        sta     L11F9
+L111A:  lda     #$07            ; SET_FILE_INFO count
+        sta     file_info_params
         ldy     #$03
 L1121:  lda     DATELO,y
         sta     $1203,y
@@ -807,7 +807,7 @@ L1121:  lda     DATELO,y
         bpl     L1121
         lda     #OPC_RTS
         sta     DATETIME
-        PRODOS_CALL MLI_SET_FILE_INFO, L11F9
+        PRODOS_CALL MLI_SET_FILE_INFO, file_info_params
         bne     :+
 
         lda     #OPC_JMP_abs
@@ -822,23 +822,23 @@ L1121:  lda     DATELO,y
         jsr     RDKEY
         jmp     L111A
 
-L114F:  PRODOS_CALL MLI_OPEN, $11E9
+L114F:  PRODOS_CALL MLI_OPEN, open_params
         bne     ShowDiskErrorAndChain
-        lda     L11EE
-        sta     L11F0
+        lda     open_params_ref_num
+        sta     read_params_ref_num
 
-        PRODOS_CALL MLI_READ, $11EF
+        PRODOS_CALL MLI_READ, read_params
         bne     ShowDiskErrorAndChain
 
-        PRODOS_CALL MLI_CLOSE, $11F7
+        PRODOS_CALL MLI_CLOSE, close_params
         bne     ShowDiskErrorAndChain
         rts
 
 L116E:  lda     DEVNUM
-        sta     L11DD
-        sta     L11E4
+        sta     on_line_unit_num
+        sta     read_block_unit_num
 
-        PRODOS_CALL MLI_ON_LINE, $11DC
+        PRODOS_CALL MLI_ON_LINE, on_line_params
         bne     ShowDiskErrorAndChain
 
         lda     $120C
@@ -849,14 +849,14 @@ L116E:  lda     DEVNUM
         lda     #'/'
         sta     $120C
 
-        PRODOS_CALL MLI_SET_PREFIX, $11E0
+        PRODOS_CALL MLI_SET_PREFIX, set_prefix_params
         bne     ShowDiskErrorAndChain
 
-        PRODOS_CALL MLI_GET_FILE_INFO, L11F9
+        PRODOS_CALL MLI_GET_FILE_INFO, file_info_params
         bne     ShowDiskErrorAndChain
         rts
 
-L119F:  PRODOS_CALL MLI_READ_BLOCK, $11E3
+L119F:  PRODOS_CALL MLI_READ_BLOCK, read_block_params
         bne     ShowDiskErrorAndChain
         rts
 
@@ -898,35 +898,61 @@ L11C7:  lda     #$02
         bne     L11C7
         rts
 
-        ;; MLI call params
+;;; ------------------------------------------------------------
+;;; MLI call params
 
-        .byte   $02
-L11DD:  .byte   $60
+on_line_params:
+        .byte   2               ; param_count
+on_line_unit_num:
+        .byte   $60             ; unit_num
+        .addr   $120C           ; data_buffer
 
-        .byte   $0C
-        .byte   $12
-        .byte   $01,$0B
-        .byte   $12,$03
-L11E4:  .byte   $60
-        .byte   $00,$1C
-L11E7:  .byte   $00
-L11E8:  .byte   $00
-        .byte   $03
-        .byte   $1D,$12,$00,$1C
-L11EE:  .byte   $00
-        .byte   $04
-L11F0:  .byte   $00
-        .byte   $00
-        .byte   $20,$00,$9F,$00,$00,$01,$00
-L11F9:  .byte   $0A
-        .byte   $35,$12
+set_prefix_params:
+        .byte   1               ; param_count
+        .addr   $120B           ; pathname
 
-L11FC:  .byte   0
-L11FD:  .byte   0
-L11FE:  .byte   0
+read_block_params:
+        .byte   3               ; param_count
+read_block_unit_num:
+        .byte   $60             ; unit_num
+        .addr   $1C00           ; data_buffer
+read_block_block_num:
+        .word   $0000           ; block_num
 
-year:   .byte   0               ; 2-digit
+open_params:
+        .byte   3               ; param_count
+        .addr   $121D           ; pathname
+        .addr   $1C00           ; io_buffer
+open_params_ref_num:
+        .byte   0               ; ref_num
 
+read_params:
+        .byte   4               ; param_count
+read_params_ref_num:
+        .byte   0               ; ref_num
+        .addr   $2000           ; data_buffer
+        .word   $9F00           ; request_count
+        .word   0               ; trans_count
+
+close_params:
+        .byte   1               ; param_count
+        .byte   0               ; ref_num
+
+file_info_params:
+        .byte   $A              ; param_count
+        .addr   str_clock_system ; pathname
+        .byte   0               ; access
+        .byte   0               ; file_type
+        ;; ...
+
+;;; ------------------------------------------------------------
+;;; Misc variables
+
+L11FE:  .byte   0               ; ???
+year:   .byte   0               ; 2-digit (shared)
+
+L1200:
+        ;; buffer for variables, filename
         .res 46, 0
 
 str_system:
@@ -936,6 +962,9 @@ str_system:
 str_clock_system:
         PASCAL_STRING "CLOCK.SYSTEM"
         strlen_str_clock_system = .strlen("CLOCK.SYSTEM")
+
+;;; ------------------------------------------------------------
+;;; Message strings
 
 message_table_lo:
         .byte   <msgInstall,<msgNoSysFile,<msgDiskError,<msgIIc
