@@ -36,8 +36,6 @@ PORT2_ACIA_CONTROL := $C0AB
 
 DISXY           := $C058
 ENBXY           := $C059
-DISVBL          := $C05A
-ENVBL           := $C05B
 X0EDGE1         := $C05C
 X0EDGE2         := $C05D
 
@@ -46,8 +44,9 @@ MOUSE_BTN          := $C063
 kClockRoutineMaxLength = 125    ; Per ProDOS 8 TRM
 
 L2000:
-L2001           := * + 1
-        lda     #$06
+        default_slot := * + 1
+        lda     #$06            ; For easy patching???
+
 L2003           := * + 1        ; Patched location for ...?
         lda     #$A0
         cmp     #$CC
@@ -161,39 +160,47 @@ L2099           := * + 1
         jsr     SetPrefixAndCheckSysFile
         lda     $1204
         lsr     a
-        sta     L22C7
-        jsr     L222B
+        sta     year
+        jsr     convert_to_bcd
         sta     bcd_year
 
-        ;; Search device list for... ???
+        ;; --------------------------------------------------
+        ;; Identify drive slot, needed for patch1
+.scope
+        ;; Search device list for Disk II device
         ldx     DEVCNT
-L20AF:  lda     DEVLST,x
-        and     #$0F
-        beq     L20C8
+:       lda     DEVLST,x
+        and     #%00001111      ; low nibble = "device identification"
+        beq     found           ; 0 = Disk II
         dex
-        bpl     L20AF
-        lda     L2001
-        and     #$07
-        bne     L20C2
-        lda     #$06
-L20C2:  asl     a
-        asl     a
-        asl     a
-        asl     a
-        bne     L20CB
+        bpl     :-
 
+        ;; Did not find Disk II, use default
+        lda     default_slot
+        and     #%00000111
+        bne     :+
+        lda     #6             ; default to slot 6 if was tweaked to 0
+:       asl     a              ; shift to 0sss0000 (like a unit number)
+        asl     a
+        asl     a
+        asl     a
+        bne     assign
 
-L20C8:  lda     DEVLST,x
-L20CB:  and     #%01110000      ; slot
+found:  lda     DEVLST,x
+
+assign: and     #%01110000      ; slot
         ora     #$80
-        sta     L22E3           ; Set $C0nn address
+        sta     patch1_firmware_byte ; Set $C0nn address
+.endscope
+        ;; --------------------------------------------------
+
         lda     L11FE
         and     #$03
-        beq     L20E3
+        beq     select_patch    ; apply patch2 if IIc, patch1 otherwise
         cmp     #$02
         bcs     L20FE
         lda     mach_type
-        bne     not_iic
+        bne     not_iic         ; apply patch3
         beq     L20FE           ; always
 
 ;;; ------------------------------------------------------------
@@ -203,7 +210,12 @@ kPatch1Offset = $0
 kPatch2Offset = $38
 kPatch3Offset = $70
 
-L20E3:  ldy     #kPatch2Offset
+;;; Patch1 - otherwise
+;;; Patch2 - for mach_type = IIc
+;;; Patch3
+
+select_patch:
+        ldy     #kPatch2Offset
         lda     mach_type
         beq     apply_patch     ; if IIc
         ldy     #kPatch1Offset
@@ -222,15 +234,19 @@ apply_patch:
         cpx     #kPatchLength
         bne     :-
 
-L20FE:  lda     #$02
-        sta     L210F
-L2103:  jsr     CalcMonthValidateDateTime
+        ;;
+L20FE:  lda     #2
+        sta     tries
+:       jsr     CalcMonthValidateDateTime
         bcs     L2111
-        dec     L210F
-        bpl     L2103
-        bmi     L2156
+        dec     tries
+        bpl     :-
+        bmi     install_clock   ; always
 
-L210F:  .byte   0
+tries:  .byte   0
+
+;;; ------------------------------------------------------------
+
 L2110:  .byte   0
 
 L2111:  lda     mach_type
@@ -269,15 +285,17 @@ no_clock:
         ;; --------------------------------------------------
 
 
-L2156:  lda     #OPC_JMP_abs
+install_clock:
+        lda     #OPC_JMP_abs
         sta     DATETIME
         lda     MACHID
         ora     #%00000001      ; has clock
         sta     MACHID
         bit     KBD
         bmi     L218C
+
         lda     month
-        cmp     #$0B
+        cmp     #11
         bcc     L2176
         bit     L11FE
         bpl     L2176
@@ -291,14 +309,18 @@ L2176:  lda     $1204
         lda     DATELO+1
         sbc     $1204
         bcs     L21DF
+
 L218C:  bit     KBDSTRB
         rol     L11FE
-        lda     #$03
+        lda     #3
         cmp     month
         ror     L11FE
 
+        ;; --------------------------------------------------
         ;; Show current year prompt
-L2199:  ldy     #MessageCode::kCurrentYear
+.scope
+show_year_prompt:
+        ldy     #MessageCode::kCurrentYear
         jsr     ShowMessage
 
         lda     bcd_year           ; 2-digit year
@@ -311,7 +333,7 @@ L2199:  ldy     #MessageCode::kCurrentYear
 :       jsr     RDKEY
         and     #%11011111      ; lowercase --> uppercase
         cmp     #'Y'|$80
-        beq     L21D3
+        beq     year_ok
         cmp     #'N'|$80
         bne     :-
 
@@ -329,11 +351,14 @@ L2199:  ldy     #MessageCode::kCurrentYear
         ora     bcd_year
         sta     bcd_year
 
-        jmp     L2199
+        jmp     show_year_prompt
+.endscope
 
+        ;; --------------------------------------------------
         ;; Current year is okay
-L21D3:  lda     $1204
-        jsr     L2210
+year_ok:
+        lda     $1204
+        jsr     year_from_bcd
         jsr     InvokeDriver
         jsr     L111A
 L21DF:  lda     RWRAM1
@@ -363,7 +388,14 @@ install_ptr := * + 1
         ;; Chain
         jmp     L1000
 
-L2210:  lda     bcd_year
+;;; ------------------------------------------------------------
+;;; Convert year from BCD
+;;; Input: bcd_year
+;;; Output: year
+;;; $06 is trashed
+
+.proc year_from_bcd
+        lda     bcd_year
         pha
         lsr     a
         lsr     a
@@ -379,10 +411,17 @@ L2210:  lda     bcd_year
         and     #$0F
         clc
         adc     $06
-        sta     L22C7
+        sta     year
         rts
+.endproc
 
-.proc L222B
+;;; ------------------------------------------------------------
+;;; Convert to BCD
+;;; Input: A = number
+;;; Output: A = BCD number
+;;; $06 is trashed
+
+.proc convert_to_bcd
         ldx     #$FF
 :       inx
         sec
@@ -400,7 +439,6 @@ L2210:  lda     bcd_year
 .endproc
 
 ;;; ------------------------------------------------------------
-
 ;;; Returns with carry set if date is not valid.
 
 .proc CalcMonthValidateDateTime
@@ -500,15 +538,20 @@ L22B2           := * + 2
         dex
         bne     L22A3
 
-L22BA:  lda     $0200
-        asl     a
-        and     #$E0
+        ;; --------------------------------------------------
+        ;; Assign month in DATELO/DATEHI
+L22BA:  lda     $0200           ; top nibble is month
+        asl     a               ; DATELO = mmmddddd
+        and     #%11100000
         ora     DATELO
         sta     DATELO
-L22C7           := * + 1
-        lda     #$56
-        rol     a
+
+        year := * + 1
+        lda     #86             ; default = 1986
+        rol     a               ; DATEHI = yyyyyyym, shift in month bit
         sta     DATELO+1
+        ;; --------------------------------------------------
+
         ldy     #$01
 L22CE:  lda     $0208,y
         ora     #$B0
@@ -536,7 +579,7 @@ Patches:
 
         ;; Patch #1
 patch1:
-L22E3           := * + 1
+patch1_firmware_byte    := * + 1
         lda     $C0E0           ; Set to $C0x0, n=slot+8
         lda     DISVBL
         ldy     #$01
