@@ -21,6 +21,8 @@
         kRemoveWriteProtect = 11
 .endenum
 
+kErrDiskWriteProtected = $2B
+
 
 ;;; Zero Page Locations
 mach_type := $07                ; 0 = IIc, 1 = II+/IIe
@@ -134,25 +136,25 @@ init_80_col:
 
         ;; End signature is two adjacent $FFs
 loop:
-
-L2072           := * + 2
+        read_msb := * + 2
         lda     L239E,y
         cmp     #$FF
-        bne     L207E
+        bne     :+
 
-L2079           := * + 2
+        check_msb := * + 2      ; check for second $FF
         ldx     L239E+1,y
         cpx     #$FF
-        beq     L208F
-L207E:
-L2080           := * + 2
+        beq     L208F           ; done!
+:
+
+        write_msb :=  * + 2
         sta     L1000,y
         iny
         bne     loop
 
-        inc     L2072
-        inc     L2079
-        inc     L2080
+        inc     read_msb
+        inc     check_msb
+        inc     write_msb
 
         bne     loop            ; always
 .endproc
@@ -171,7 +173,7 @@ L2099           := * + 1
         lda     $1204
         lsr     a
         sta     year
-        jsr     convert_to_bcd
+        jsr     ConvertToBCD
         sta     bcd_year
 
         ;; --------------------------------------------------
@@ -312,12 +314,14 @@ install_clock:
         sta     $1204
 L2176:  lda     $1204
         lsr     a
-        cmp     #$56
+        cmp     #(kDefaultYear .mod 100)
         bcc     L218C
+
+        ;; Two byte compare
         lda     DATELO
-        cmp     $1203
+        cmp     file_info_params + $A ; mod_date
         lda     DATELO+1
-        sbc     $1204
+        sbc     file_info_params + $A + 1 ; mod_date + 1
         bcs     L21DF
 
 L218C:  bit     KBDSTRB
@@ -329,7 +333,7 @@ L218C:  bit     KBDSTRB
         ;; --------------------------------------------------
         ;; Show current year prompt
 .scope
-show_year_prompt:
+retry:
         ldy     #MessageCode::kCurrentYear
         jsr     ShowMessage
 
@@ -351,26 +355,26 @@ show_year_prompt:
         ldy     #MessageCode::kCurrentYear
         jsr     ShowMessage
         jsr     GetDigitKey     ; Decade
-        asl     a
+        asl     a               ; move tens digit to high nibble
         asl     a
         asl     a
         asl     a
         sta     bcd_year
         jsr     GetDigitKey     ; Year
-        and     #$0F
+        and     #$0F            ; mask ones digit
         ora     bcd_year
         sta     bcd_year
 
-        jmp     show_year_prompt
+        jmp     retry
 .endscope
 
         ;; --------------------------------------------------
         ;; Current year is okay
 year_ok:
         lda     $1204
-        jsr     year_from_bcd
+        jsr     YearFromBCD
         jsr     InvokeDriver
-        jsr     L111A
+        jsr     WriteFileInfo
 
 L21DF:  lda     RWRAM1          ; Driver lives in LC Bank 1
         lda     RWRAM1          ; so bank that in
@@ -406,7 +410,7 @@ install_ptr := * + 1
 ;;; Output: year
 ;;; $06 is trashed
 
-.proc year_from_bcd
+.proc YearFromBCD
         lda     bcd_year
         pha
         lsr     a
@@ -433,7 +437,7 @@ install_ptr := * + 1
 ;;; Output: A = BCD number
 ;;; $06 is trashed
 
-.proc convert_to_bcd
+.proc ConvertToBCD
         ldx     #$FF
 :       inx
         sec
@@ -889,30 +893,40 @@ done:   rts
 .endproc
 
 ;;; ------------------------------------------------------------
+;;; Write current date/time to a file.
 
-L111A:  lda     #$07            ; SET_FILE_INFO count
+.proc WriteFileInfo
+retry:
+        lda     #7              ; SET_FILE_INFO count
         sta     file_info_params
-        ldy     #$03
-L1121:  lda     DATELO,y
-        sta     $1203,y
+
+        ;; Fill params with current date/time.
+        ldy     #3
+:       lda     DATELO,y
+        sta     file_info_params + $A,y ; mod_date
         dey
-        bpl     L1121
-        lda     #OPC_RTS
+        bpl     :-
+
+        lda     #OPC_RTS        ; Temporarily disable driver
         sta     DATETIME
         PRODOS_CALL MLI_SET_FILE_INFO, file_info_params
         bne     :+
-
-        lda     #OPC_JMP_abs
+        lda     #OPC_JMP_abs    ; Re-enable driver
         sta     DATETIME
         rts
 
-:       cmp     #$2B
-        bne     ShowDiskErrorAndChain
+        ;; Error; maybe retry?
+
+:       cmp     #kErrDiskWriteProtected
+        bne     ShowDiskErrorAndChain ; Failed
+
+        ;; Write protected - show error and retry
         ldy     #MessageCode::kRemoveWriteProtect
         jsr     ShowMessage
-        jsr     L11C3
+        jsr     Bell
         jsr     RDKEY
-        jmp     L111A
+        jmp     retry
+.endproc
 
 ;;; ------------------------------------------------------------
 
@@ -975,7 +989,7 @@ L119F:  PRODOS_CALL MLI_READ_BLOCK, read_block_params
 .proc ShowMessageAndMaybeChain
         sty     msg_num
         jsr     ShowMessage
-        jsr     L11C3
+        jsr     Bell
         lda     msg_num
         cmp     #MessageCode::kNoClock
         bne     loop
@@ -987,18 +1001,25 @@ loop:   jmp     loop           ; Infinite loop!
 .endproc
 
 ;;; ------------------------------------------------------------
+;;; Make a tone (from ProDOS Technical Reference Manual)
+;;; $0C is trashed
 
-L11C3:  lda     #$20
-        sta     $0C
-L11C7:  lda     #$02
+.proc Bell
+
+        length  := $0C
+
+        lda     #$20            ; duration of tone
+        sta     length
+bell1:  lda     #$2             ; short delay...click
         jsr     WAIT
         sta     SPKR
-        lda     #$24
+        lda     #$24            ; long delay...click ($20 in TRM)
         jsr     WAIT
         sta     SPKR
-        dec     $0C
-        bne     L11C7
+        dec     length
+        bne     bell1           ; repeat length times
         rts
+.endproc
 
 ;;; ------------------------------------------------------------
 ;;; MLI call params
