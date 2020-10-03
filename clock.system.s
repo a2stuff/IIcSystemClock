@@ -21,12 +21,15 @@
         kRemoveWriteProtect = 11
 .endenum
 
+
+;;; Zero Page Locations
 mach_type := $07                ; 0 = IIc, 1 = II+/IIe
 case_mask := $08                ; mask with chars before COUT
 has_80col := $09                ; 1 = has 80 column card
 month     := $0A                ; month from current date
 msg_num   := $0B                ; stashed message number
 
+PRODOS_SYS_START := $2000
 
 SLOT3_FIRMWARE           := $C300
 
@@ -43,13 +46,20 @@ MOUSE_BTN          := $C063
 
 kClockRoutineMaxLength = 125    ; Per ProDOS 8 TRM
 
+kDefaultDriveSlot = 6
+
+kIIcVersionByte = HI('L')
+kDefaultVersionByte     = HI(' ')
+
+kDefaultYear = 1986
+
 L2000:
         default_slot := * + 1
-        lda     #$06            ; For easy patching???
+        lda     #kDefaultDriveSlot ; For easy patching???
 
-L2003           := * + 1        ; Patched location for ...?
-        lda     #$A0
-        cmp     #$CC
+        version_test_byte := *+1
+        lda     #kDefaultVersionByte
+        cmp     #kIIcVersionByte
         bne     L2013
 
         sta     L239E + (L1272 - L1000) ; In relocated code
@@ -83,8 +93,8 @@ L2013:
 
 :       cmp     #%10001000      ; IIc ?
         beq     is_iic
-        lda     L2003           ; Hack ???
-        cmp     #$CC
+        lda     version_test_byte ; Hack ???
+        cmp     #kIIcVersionByte
         beq     is_iic
         iny                     ; Not a IIc
 is_iic: sty     mach_type
@@ -361,17 +371,19 @@ year_ok:
         jsr     year_from_bcd
         jsr     InvokeDriver
         jsr     L111A
-L21DF:  lda     RWRAM1
-        lda     RWRAM1
-        lda     DATETIME+1
+
+L21DF:  lda     RWRAM1          ; Driver lives in LC Bank 1
+        lda     RWRAM1          ; so bank that in
+
+        lda     DATETIME+1      ; driver destination
         sta     install_ptr
         clc
-        adc     #$76
-        sta     L22B1
-        lda     DATETIME+2
+        adc     #time_offset_table - Driver ; patch an internal reference (LSB)
+        sta     offset_table_addr
+        lda     DATETIME+2      ; driver destination
         sta     install_ptr+1
         adc     #0
-        sta     L22B2
+        sta     offset_table_addr+1 ; patch an internal reference (MSB)
 
         ;; Relocate clock driver
         ldy     #kClockRoutineMaxLength - 1
@@ -383,7 +395,7 @@ install_ptr := * + 1
 
         ;; Initialize the time (via driver)
         jsr     DATETIME
-        lda     ROMIN2
+        lda     ROMIN2          ; Bank ROM back in
 
         ;; Chain
         jmp     L1000
@@ -521,19 +533,21 @@ L228A           := * + 1
         pla                     ; Restore command register
 L229F           := * + 1
         sta     PORT2_ACIA_COMMAND
-        ldx     #$06
 
+        ;; Process digits
+        ldx     #6
 L22A3:  lda     $0201,x
-:       dec     $0200,x
-        bmi     L22B0
+
+:       dec     $0200,x         ;
+        bmi     :+
         clc
         adc     #10
         bcc     :-
-L22B0:
-L22B1           := * + 1
-L22B2           := * + 2
-        ldy     L22DB,x
-        sta     $BF30,y         ; Modifying DEVLST ???
+:
+
+        offset_table_addr := * + 1
+        ldy     time_offset_table,x      ; Offset table
+        sta     DEVNUM,y     ; y is offset from DEVNUM for some reason
         dex
         dex
         bne     L22A3
@@ -547,7 +561,7 @@ L22BA:  lda     $0200           ; top nibble is month
         sta     DATELO
 
         year := * + 1
-        lda     #86             ; default = 1986
+        lda     #(kDefaultYear .mod 100)
         rol     a               ; DATEHI = yyyyyyym, shift in month bit
         sta     DATELO+1
         ;; --------------------------------------------------
@@ -559,15 +573,16 @@ L22CE:  lda     $0208,y
         dey
         bpl     L22CE
         dex
-L22DB           := * + 1
         bne     L22BA
         plp
         rts
 
-        .byte   $FF
-        .byte   $63
-        .byte   $FF
-        .byte   $62
+time_offset_table       := * - 3
+
+        .byte   $FF               ; dummy
+        .byte   TIMELO+1 - DEVNUM ; offset
+        .byte   $FF               ; dummy
+        .byte   TIMELO - DEVNUM   ; offset
 
         ;; End of relocated clock driver
 
@@ -717,7 +732,6 @@ case_mask_table:
         .byte   %11011111       ; map lowercase to uppercase
         .byte   %11111111       ; preserve case
 
-
 chain:
 L239E:
         ;; Relocated to $1000
@@ -806,7 +820,7 @@ L1077:  lda     ($00),y
         jsr     COUT
         lda     #$8D
         jsr     COUT
-L10A5:  jmp     L2000
+L10A5:  jmp     PRODOS_SYS_START
 
 L10A8:  clc
         lda     $00
@@ -1017,20 +1031,20 @@ open_params_ref_num:
 read_params:
         .byte   4               ; param_count
 read_params_ref_num:
-        .byte   0               ; ref_num
-        .addr   $2000           ; data_buffer
-        .word   $9F00           ; request_count
-        .word   0               ; trans_count
+        .byte   0                       ; ref_num
+        .addr   PRODOS_SYS_START        ; data_buffer
+        .word   PRODOS-PRODOS_SYS_START ; request_count
+        .word   0                       ; trans_count
 
 close_params:
         .byte   1               ; param_count
         .byte   0               ; ref_num
 
 file_info_params:
-        .byte   $A              ; param_count
+        .byte   $A               ; param_count
         .addr   str_clock_system ; pathname
-        .byte   0               ; access
-        .byte   0               ; file_type
+        .byte   0                ; access
+        .byte   0                ; file_type
         ;; ...
 
 ;;; ------------------------------------------------------------
