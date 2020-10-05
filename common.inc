@@ -58,20 +58,47 @@ MLI_CLOSE       := $CC
 
 ;;; Volume Directory Block Header structure
 .scope VolumeDirectoryBlockHeader
-        prev_block              := $00
-        next_block              := $02
-        entry_length            := $23
-        entries_per_block       := $24
-        header_length           := $2B
+        prev_block              = $00
+        next_block              = $02
+        entry_length            = $23
+        entries_per_block       = $24
+        header_length           = $2B
 .endscope
 
-;; File Entry structure
-.scope FileEntry
-        storage_type := $00
-        name_length := $00
-        file_name := $01
-        file_type := $10
-.endscope
+        ;; File Entry structure
+.struct FileEntry
+        storage_type_name_length        .byte
+        file_name       .res 15
+        file_type       .byte
+        key_pointer     .word
+        blocks_used     .word
+        EOF             .faraddr
+        creation        .dword
+        version         .byte
+        min_version     .byte
+        access          .byte
+        aux_type        .word
+        last_mod        .dword
+        header_pointer  .word
+.endstruct
+
+.struct GET_FILE_INFO_PARAMS
+        param_count     .byte
+        pathname        .word
+        access          .byte
+        file_type       .byte
+        aux_type        .word
+        storage_type    .byte
+        blocks_used     .word
+        mod_date        .word
+        mod_time        .word
+        create_date     .word
+        create_time     .word
+.endstruct
+
+.enum FileType
+        kSYS = $FF
+.endenum
 
 ;;; ------------------------------------------------------------
 ;;; Monitor

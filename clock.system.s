@@ -169,8 +169,10 @@ L2095           := * + 1
 L2099           := * + 1
         ldy     #$05
         sty     $23
-        jsr     SetPrefixAndCheckSysFile
-        lda     $1204
+
+        jsr     SetPrefixAndGetFileInfo
+
+        lda     file_info_params + GET_FILE_INFO_PARAMS::mod_date + 1
         lsr     a
         sta     year
         jsr     ConvertToBCD
@@ -303,28 +305,29 @@ install_clock:
         lda     MACHID
         ora     #%00000001      ; has clock
         sta     MACHID
-        bit     KBD
-        bmi     L218C
+
+        bit     KBD             ; Key pressed?
+        bmi     skip
 
         lda     month
         cmp     #11
-        bcc     L2176
+        bcc     :+
         bit     L11FE
-        bpl     L2176
+        bpl     :+
         sta     $1204
-L2176:  lda     $1204
+:       lda     $1204
         lsr     a
         cmp     #(kDefaultYear .mod 100)
-        bcc     L218C
+        bcc     skip
 
         ;; Two byte compare
         lda     DATELO
-        cmp     file_info_params + $A ; mod_date
+        cmp     file_info_params + GET_FILE_INFO_PARAMS::mod_date
         lda     DATELO+1
-        sbc     file_info_params + $A + 1 ; mod_date + 1
+        sbc     file_info_params + GET_FILE_INFO_PARAMS::mod_date + 1
         bcs     L21DF
 
-L218C:  bit     KBDSTRB
+skip:   bit     KBDSTRB
         rol     L11FE
         lda     #3
         cmp     month
@@ -746,50 +749,68 @@ L239E:
 
         .org $1000
 
-L1000:
+.proc L1000
+
+entry_ptr               := $00
+entry_length            := $02
+entries_per_block       := $03
+entry_num               := $04
+name_length             := $05
+
         ldy     #$00
         sty     read_block_block_num+1
         iny
-        sty     $04
+        sty     entry_num
         iny
         sty     read_block_block_num
-        jsr     L119F
-        lda     $1C23
-        sta     $02
-        lda     $1C24
-        sta     $03
-        lda     #$2B
-        sta     $00
-        lda     #$1C
-        sta     $01
-L1021:  ldy     #$10
-        lda     ($00),y
-        cmp     #$FF
-        bne     L10A8
-        ldy     #$00
-        lda     ($00),y
-        and     #$30
-        beq     L10A8
-        lda     ($00),y
-        and     #$0F
-        sta     $05
+        jsr     ReadBlock
+        lda     block_buffer + VolumeDirectoryBlockHeader::entry_length
+        sta     entry_length
+        lda     block_buffer + VolumeDirectoryBlockHeader::entries_per_block
+        sta     entries_per_block
+        lda     #<$1C2B
+        sta     entry_ptr
+        lda     #>$1C2B
+        sta     entry_ptr+1
+
+entries_loop:
+        ;; SYS file?
+        ldy     #FileEntry::file_type
+        lda     (entry_ptr),y
+        cmp     #FileType::kSYS
+        bne     next_entry
+
+        ldy     #0
+        lda     (entry_ptr),y
+        and     #$30            ; storage_type
+        beq     next_entry
+
+        ;; Check name
+        lda     (entry_ptr),y
+        and     #$0F            ; name_length
+        sta     name_length
+
+        ;; Does name have ".SYSTEM" suffix?
         tay
         ldx     #strlen_str_system - 1
-L103A:  lda     ($00),y
+:       lda     (entry_ptr),y
         cmp     str_system,x
-        bne     L10A8
+        bne     next_entry      ; nope, continue
         dey
         dex
-        bpl     L103A
+        bpl     :-
+
+        ;; Is it "CLOCK.SYSTEM" (i.e. this file)?
         ldy     #strlen_str_clock_system
-L1047:  lda     ($00),y
+:       lda     (entry_ptr),y
         cmp     str_clock_system,y
         bne     L1053
         dey
-        bne     L1047
-        beq     L10A8
+        bne     :-
+        beq     next_entry      ; match - (but want *next* system file)
+
 L1053:  lda     $05
-        sta     $121D
+        sta     open_pathname
         sta     $0280
         inc     $05
         lda     msg_num
@@ -797,70 +818,84 @@ L1053:  lda     $05
         beq     L1070
         ldy     #$03
         jsr     L10E5
+
         lda     mach_type
-        beq     L106D
+        beq     :+
         iny
-L106D:  jsr     ShowMessage
+:       jsr     ShowMessage
+
 L1070:  ldy     #MessageCode::kRunning
         jsr     ShowMessage
-        ldy     #$01
-L1077:  lda     ($00),y
-        sta     $121D,y
+
+        ldy     #1
+:       lda     (entry_ptr),y
+        sta     open_pathname,y
         sta     $0280,y
         ora     #$80
         jsr     COUT
         iny
         cpy     $05
-        bne     L1077
+        bne     :-
+
         jsr     LoadSysFile
-        lda     #$00
+
+        ;; Restore text window
+        lda     #0
         sta     WNDTOP
-        lda     #$18
+        lda     #24
         sta     WNDBTM
         jsr     MON_HOME
         lda     has_80col
+
         beq     L10A5
-        lda     #$15
+        lda     #$15            ; ??? Mousetext?
         jsr     COUT
-        lda     #$8D
+        lda     #HI(CR)
         jsr     COUT
 L10A5:  jmp     PRODOS_SYS_START
 
-L10A8:  clc
-        lda     $00
-        adc     $02
-        sta     $00
-        lda     $01
-        adc     #$00
-        sta     $01
-        inc     $04
-        lda     $04
-        cmp     $03
+next_entry:
+        clc
+        lda     entry_ptr
+        adc     entry_length
+        sta     entry_ptr
+        lda     entry_ptr+1
+        adc     #0
+        sta     entry_ptr+1
+        inc     entry_num
+        lda     entry_num
+        cmp     entries_per_block
         bne     L10E2
-        ldy     $1C02
+
+        ldy     block_buffer + VolumeDirectoryBlockHeader::next_block
         sty     read_block_block_num
-        lda     $1C03
+        lda     block_buffer + VolumeDirectoryBlockHeader::next_block+1
         sta     read_block_block_num+1
-        bne     :+
+        bne     :+              ; Error if next_block LSB/MSB are both 0
         tya
         bne     :+
         ldy     #MessageCode::kNoSysFile
         jmp     ShowMessageAndMaybeChain
 
-:       jsr     L119F
+:       jsr     ReadBlock
         lda     #$00
-        sta     $04
-        lda     #$04
-        sta     $00
-        lda     #$1C
-        sta     $01
-L10E2:  jmp     L1021
+        sta     entry_num
+        lda     #$04            ; skip past prev_block/next_block
+        sta     entry_ptr
+        lda     #>block_buffer
+        sta     entry_ptr+1
+L10E2:  jmp     entries_loop
 
-L10E5:  lda     L11FE
+;;; ???
+.proc L10E5
+        lda     L11FE
         and     #$03
-        bne     L10EE
+        bne     :+
         ldy     #$09
-L10EE:  rts
+:       rts
+.endproc
+
+.endproc
 
 ;;; ------------------------------------------------------------
 ;;; Call with message number in Y.
@@ -903,7 +938,7 @@ retry:
         ;; Fill params with current date/time.
         ldy     #3
 :       lda     DATELO,y
-        sta     file_info_params + $A,y ; mod_date
+        sta     file_info_params + GET_FILE_INFO_PARAMS::mod_date,y
         dey
         bpl     :-
 
@@ -945,36 +980,47 @@ retry:
 .endproc
 
 ;;; ------------------------------------------------------------
+;;; Set prefix to most recently used device's name, and
+;;; get this driver's file info (which holds current year)
+;;; On error, displays the error and chains to next file.
 
-.proc SetPrefixAndCheckSysFile
+.proc SetPrefixAndGetFileInfo
         lda     DEVNUM          ; Most recently accessed device
         sta     on_line_unit_num
         sta     read_block_unit_num
 
+        ;; Get the volume name
         PRODOS_CALL MLI_ON_LINE, on_line_params
         bne     ShowDiskErrorAndChain
 
-        lda     $120C
-        and     #$0F
+        ;; Convert to a path
+        lda     on_line_buffer
+        and     #$0F            ; mask off length
         tay
         iny
-        sty     $120B
-        lda     #'/'
-        sta     $120C
+        sty     set_prefix_buffer ; increase length by one...
+        lda     #'/'              ; for leading '/'
+        sta     on_line_buffer
 
+        ;; Set the prefix
         PRODOS_CALL MLI_SET_PREFIX, set_prefix_params
         bne     ShowDiskErrorAndChain
 
+        ;; And get this file's info
         PRODOS_CALL MLI_GET_FILE_INFO, file_info_params
         bne     ShowDiskErrorAndChain
         rts
 .endproc
 
 ;;; ------------------------------------------------------------
+;;; Read a block
+;;; On error, displays the error and chains to next file.
 
-L119F:  PRODOS_CALL MLI_READ_BLOCK, read_block_params
+.proc ReadBlock
+        PRODOS_CALL MLI_READ_BLOCK, read_block_params
         bne     ShowDiskErrorAndChain
         rts
+.endproc
 
 ;;; ------------------------------------------------------------
 
@@ -1028,23 +1074,25 @@ on_line_params:
         .byte   2               ; param_count
 on_line_unit_num:
         .byte   $60             ; unit_num
-        .addr   $120C           ; data_buffer
+        .addr   on_line_buffer  ; data_buffer
 
 set_prefix_params:
         .byte   1               ; param_count
-        .addr   $120B           ; pathname
+        .addr   set_prefix_buffer ; pathname
+
+block_buffer = $1C00
 
 read_block_params:
         .byte   3               ; param_count
 read_block_unit_num:
         .byte   $60             ; unit_num
-        .addr   $1C00           ; data_buffer
+        .addr   block_buffer    ; data_buffer
 read_block_block_num:
         .word   $0000           ; block_num
 
 open_params:
         .byte   3               ; param_count
-        .addr   $121D           ; pathname
+        .addr   open_pathname   ; pathname
         .addr   $1C00           ; io_buffer
 open_params_ref_num:
         .byte   0               ; ref_num
@@ -1077,6 +1125,10 @@ bcd_year:   .byte   0           ; 2-digit (shared)
 L1200:
         ;; buffer for variables, filename
         .res 46, 0
+
+set_prefix_buffer       := $120B
+on_line_buffer          := set_prefix_buffer+1
+open_pathname           := $121D
 
 str_system:
         .byte   ".SYSTEM"
