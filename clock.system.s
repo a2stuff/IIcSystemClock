@@ -77,8 +77,8 @@ L2000:
 
         sta     L239E + (L1272 - L1000) ; In relocated code
         lda     #kPatchedDelay
-        sta     delay_patch1
-        sta     patch2_delay
+        sta     Patch0_delay_patch1
+        sta     Patch2_delay
 L2013:
         ;; Clear stack
         ldx     #$FF
@@ -190,7 +190,7 @@ L2099           := * + 1
         sta     bcd_year
 
         ;; --------------------------------------------------
-        ;; Identify drive slot, needed for patch1
+        ;; Identify drive slot, needed for Patch1
 .scope
         ;; Search device list for Disk II device
         ldx     DEVCNT
@@ -215,7 +215,7 @@ found:  lda     DEVLST,x
 
 assign: and     #%01110000      ; slot
         ora     #$80
-        sta     patch1_firmware_byte ; Set $C0nn address
+        sta     Patch1_firmware_byte ; Set $C0nn address
 .endscope
         ;; --------------------------------------------------
 
@@ -225,28 +225,28 @@ assign: and     #%01110000      ; slot
         cmp     #$02
         bcs     L20FE
         lda     mach_type
-        bne     not_iic         ; apply patch3
+        bne     not_iic         ; apply Patch3
         beq     L20FE           ; always
 
 ;;; ------------------------------------------------------------
 
 kPatchLength = $38
 
-;;; Default -
-;;; Patch1  - otherwise
-;;; Patch2  - for mach_type = IIc
+;;; Patch0 - (default)
+;;; Patch1 - otherwise
+;;; Patch2 - for mach_type = IIc
 ;;; Patch3
 
 select_patch:
-        ldy     #patch2 - Patches
+        ldy     #Patch2 - Patches
         lda     mach_type
         beq     apply_patch     ; if IIc
-        ldy     #patch1 - Patches
+        ldy     #Patch1 - Patches
         jmp     apply_patch
 
         ;; Patch bytes on top of driver
 not_iic:
-        ldy     #patch3 - Patches
+        ldy     #Patch3 - Patches
 
 apply_patch:
         ldx     #0
@@ -279,14 +279,14 @@ L2110:  .byte   0
         bne     skip
         inc     L2110
         ldy     #<PORT1_ACIA_STATUS
-        sty     acia_status_patch1
+        sty     Patch0_acia_status_patch1
         iny                     ; <PORT1_ACIA_COMMAND
-        sty     acia_command_patch1
-        sty     acia_command_patch2
+        sty     Patch0_acia_command_patch1
+        sty     Patch0_acia_command_patch2
         lda     L11FE
         and     #$03
         beq     L20FE
-        sty     acia_command_patch3
+        sty     Patch0_acia_command_patch3
         bne     L20FE
 
 skip:   ldy     #MessageCode::kNoClock
@@ -516,21 +516,30 @@ Driver: cld
         ;; Patch applied from here...
 patch_target:
 
+.proc Patch0
+
 acia_command_patch1 := * + 1
         lda     PORT2_ACIA_COMMAND
         pha                     ; Save command register
-        ldy     #$03
-        ldx     #$16
+
+        ;; Poke COMMAND register
+        ldy     #3              ; tries
+        ldx     #22             ; delay
         lda     #%00001000
-L2273:
+command_loop:
 acia_command_patch2 := * + 1
         sta     PORT2_ACIA_COMMAND
-L2276:  dex
-        bne     L2276
+
+:       dex
+        bne     :-
+
         eor     #%00001010
         ldx     #$09
         dey
-        bne     L2273
+        bne     command_loop
+
+
+
         ldy     #$04
         bne     L2289
 L2284:
@@ -558,6 +567,13 @@ acia_status_patch1 := * + 1
 acia_command_patch3 := * + 1
         sta     PORT2_ACIA_COMMAND
 
+.endproc
+        .assert .sizeof(Patch0) = kPatchLength, error, "Patch length"
+        Patch0_acia_command_patch1 := Patch0::acia_command_patch1
+        Patch0_acia_command_patch2 := Patch0::acia_command_patch2
+        Patch0_acia_command_patch3 := Patch0::acia_command_patch3
+        Patch0_delay_patch1 := Patch0::delay_patch1
+        Patch0_acia_status_patch1 := Patch0::acia_status_patch1
         ;; ...Patch applied to here.
         ;; --------------------------------------------------
 
@@ -580,7 +596,7 @@ digit_loop:
 
         offset_table_addr := * + 1
         ldy     time_offset_table,x      ; Offset table
-        sta     DEVNUM,y     ; y is offset from DEVNUM for some reason
+        sta     DEVNUM,y  ; y is offset from DEVNUM for RTS hack below
         dex
         dex
         bne     digit_loop
@@ -590,6 +606,9 @@ digit_loop:
 
         ;; --------------------------------------------------
         ;; Assign month in DATELO/DATEHI
+
+        ;; TODO: How do both digits of MM get processed ???
+
 L22BA:  lda     digits_buffer   ; top nibble is month???
         asl     a               ; DATELO = mmmddddd
         and     #%11100000
@@ -608,6 +627,8 @@ L22BA:  lda     digits_buffer   ; top nibble is month???
         sta     $020F,y
         dey
         bpl     :-
+
+        ;; TODO: X=0 first time through; does this loop run 256 times?
 
         dex
         bne     L22BA
@@ -643,7 +664,7 @@ Patches:
         ;; --------------------------------------------------
         ;; Patch #1
 
-.proc patch1
+.proc Patch1
 firmware_byte    := * + 1
         lda     $C0E0           ; Set to $C0x0, n=slot+8
         lda     DISVBL
@@ -675,13 +696,13 @@ L2307:  lda     MOUSE_BTN
         dex
         bpl     L2300
 .endproc
-        .assert .sizeof(patch1) = kPatchLength, error, "Patch length"
-        patch1_firmware_byte := patch1::firmware_byte
+        .assert .sizeof(Patch1) = kPatchLength, error, "Patch length"
+        Patch1_firmware_byte := Patch1::firmware_byte
 
         ;; --------------------------------------------------
         ;; Patch #2
 
-.proc patch2
+.proc Patch2
         ;; Prime the command
         lda     PORT2_ACIA_COMMAND
         nop
@@ -723,13 +744,13 @@ read_status:
         nop
         nop
 .endproc
-        .assert .sizeof(patch2) = kPatchLength, error, "Patch length"
-        patch2_delay := patch2::delay
+        .assert .sizeof(Patch2) = kPatchLength, error, "Patch length"
+        Patch2_delay := Patch2::delay
 
         ;; --------------------------------------------------
         ;; Patch #3
 
-.proc patch3
+.proc Patch3
         lda     ENVBL
         sta     ENBXY
         sta     X0EDGE1
@@ -761,7 +782,7 @@ L236B:  lda     MOUSE_BTN
         bpl     L2369
         lda     DISVBL
 .endproc
-        .assert .sizeof(patch3) = kPatchLength, error, "Patch length"
+        .assert .sizeof(Patch3) = kPatchLength, error, "Patch length"
 
 ;;; ============================================================
 
