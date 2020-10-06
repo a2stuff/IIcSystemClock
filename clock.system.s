@@ -81,7 +81,7 @@ L2000:
 
         sta     L239E + (L1272 - L1000) ; In relocated code
         lda     #kPatchedDelay
-        sta     Patch0_delay_patch1
+        sta     Patch0_delay
         sta     Patch2_delay
 L2013:
         ;; Clear stack
@@ -236,9 +236,9 @@ assign: and     #%01110000      ; slot
 
 kPatchLength = $38
 
-;;; Patch0 - (default)
+;;; Patch0 - (default) SSC in either Slot 1 or Slot 2
 ;;; Patch1 - otherwise
-;;; Patch2 - for mach_type = IIc
+;;; Patch2 - for mach_type = IIc; SSC in Slot 2, COMMAND not restored
 ;;; Patch3
 
 select_patch:
@@ -541,25 +541,26 @@ acia_command_patch2 := * + 1
         bne     :-
 
         eor     #%00001010
-        ldx     #9              ; repeat delay
+        ldx     #9              ; repeat delay and # of fields-1
         dey
         bne     command_loop
 
         ;; ------------------------------
         ;; Read bit out of STATUS register
         ;; 1 bit at a time in blocks of 4, giving
-        ;; "MMDDhhmm" in high nibble of each byte
+        ;; "MMDDhhmmss" in low nibble of each byte
+        ;; except first byte where it's high nibble
 
-        ldy     #4
-        bne     read            ; always
+        ldy     #4              ; 4 bits per digit
+        bne     read_status     ; always
 read_loop:
 
-delay_patch1 := * + 1
+delay := * + 1
         lda     #kDefaultDelay
 :       dec                     ; 65C02
         bne     :-
 
-read:
+read_status:
 acia_status_patch1 := * + 1
         lda     PORT2_ACIA_STATUS
         rol     a               ; shift out bit 5
@@ -584,15 +585,17 @@ acia_command_patch3 := * + 1
         Patch0_acia_command_patch1 := Patch0::acia_command_patch1
         Patch0_acia_command_patch2 := Patch0::acia_command_patch2
         Patch0_acia_command_patch3 := Patch0::acia_command_patch3
-        Patch0_delay_patch1 := Patch0::delay_patch1
+        Patch0_delay := Patch0::delay
         Patch0_acia_status_patch1 := Patch0::acia_status_patch1
         ;; ...Patch applied to here.
         ;; --------------------------------------------------
 
         ;; digits_buffer $200...$207 now has "MMDDhhmm",
-        ;; each digit in the low (???) nibble of a separate byte (???)
-        ;; e.g.   1/1 01:01 would be ... ???
-        ;; e.g. 12/31 23:59 would be ... ???
+        ;; each digit (?) in the low nibble of a separate byte
+        ;; except first byte where it's in high nibble
+        ;;                             M        D---D   h---h   m---m
+        ;; e.g.   1/2 03:04 would be: $10 $00 $00 $02 $00 $03 $00 $04
+        ;; e.g. 12/31 23:59 would be: $C0 $00 $03 $01 $02 $03 $05 $09
 
         ;; --------------------------------------------------
         ;; Process fields (two digits/bytes at a time)
@@ -622,10 +625,7 @@ digit_loop:
         ;; --------------------------------------------------
         ;; Assign month in DATELO/DATEHI
 
-        ;; TODO: Why does this process digits_buffer and not
-        ;; digits_buffer + 1?
-
-L22BA:  lda     digits_buffer   ; top nibble is month ???
+L22BA:  lda     digits_buffer   ; top nibble is month
         asl     a               ; DATELO = mmmddddd
         and     #%11100000
         ora     DATELO
@@ -720,24 +720,34 @@ L2307:  lda     MOUSE_BTN
 ;;; Patch 2:
 
 .proc Patch2
-        ;; Prime the command
-        lda     PORT2_ACIA_COMMAND
-        nop
-        ldy     #$03
-        ldx     #$16
+        lda     PORT2_ACIA_COMMAND ; unused
+        nop                     ; could be PHA to save
+
+        ;; ------------------------------
+        ;; Unlock COMMAND register
+        ldy     #3              ; cycles
+        ldx     #22             ; initial delay
         lda     #%00000010
 command_loop:
         sta     PORT2_ACIA_COMMAND
-:       dex
+
+:       dex                     ; wait
         bne     :-
-        eor     #$0A
-        ldx     #$09
+
+        eor     #%00001010
+        ldx     #9              ; repeat delay
         dey
         bne     command_loop
-        ldy     #$04
+
+        ;; ------------------------------
+        ;; Read bit out of STATUS register
+        ;; 1 bit at a time in blocks of 4, giving
+        ;; "MMDDhhmmss" in low nibble of each byte
+        ;; except first byte where it's high nibble
+
+        ldy     #4              ; 4 bits per digit
         bne     read_status     ; always
 
-        ;; Read the result
 read_loop:
 delay := * + 1
         lda     #kDefaultDelay
@@ -746,18 +756,19 @@ delay := * + 1
 
 read_status:
         lda     PORT2_ACIA_STATUS
-        eor     #$20
+        eor     #%00100000      ; invert bit 5
+        rol     a               ; shift out bit 5
         rol     a
         rol     a
-        rol     a
-        ror     digits_buffer,x
+        ror     digits_buffer,x ; and into digits
         lsr     digits_buffer+1,x
         dey
         bne     read_loop
-        ldy     #$04
+        ldy     #4              ; 4 bits per digit
         dex
         bpl     read_loop
 
+        ;; Padding
         nop
         nop
 .endproc
