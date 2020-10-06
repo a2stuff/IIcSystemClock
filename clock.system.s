@@ -541,7 +541,7 @@ acia_command_patch2 := * + 1
         bne     :-
 
         eor     #%00001010
-        ldx     #9              ; repeat delay and # of fields-1
+        ldx     #9              ; repeat delay and # of digits-1
         dey
         bne     command_loop
 
@@ -552,7 +552,7 @@ acia_command_patch2 := * + 1
         ;; except first byte where it's high nibble
 
         ldy     #4              ; 4 bits per digit
-        bne     read_status     ; always
+        bne     read_status     ; always; no waiting on first iteration
 read_loop:
 
 delay := * + 1
@@ -682,36 +682,52 @@ Patches:
 ;;; Patch 1:
 
 .proc Patch1
+        ;; Trigger reading
 firmware_byte    := * + 1
         lda     $C0E0           ; Set to $C0x0, n=slot+8
         lda     DISVBL
-        ldy     #$01
-        ldx     #$16
-L22EC:  dex
-        bne     L22EC
+
+        ldy     #1
+        ldx     #22
+trigger_loop:
+        dex
+        bne     trigger_loop
         lda     DISVBL,y
-        ldx     #$0B
+        ldx     #11
         dey
-        bpl     L22EC
-L22F7:  dex
-        bne     L22F7
-        ldx     #$09
-        ldy     #$04
-        bne     L2307
-L2300:  lda     #$5D
+        bpl     trigger_loop
+
+:       dex
+        bne     :-
+
+        ;; ------------------------------
+        ;; Read bit out of register
+        ;; 1 bit at a time in blocks of 4, giving
+        ;; "MMDDhhmmss" in low nibble of each byte
+        ;; except first byte where it's high nibble
+
+        ldx     #9              ; # of digits - 1
+        ldy     #4              ; 4 bits per digit
+        bne     read_register   ; always; no waiting on first iteration
+
+        ;; Wait a bit
+read_loop:
+        lda     #kDefaultDelay
         sec
-L2303:  sbc     #$01
-        bne     L2303
-L2307:  lda     MOUSE_BTN
+:       sbc     #1
+        bne     :-
+
+read_register:
+        lda     MOUSE_BTN
         rol     a
         ror     digits_buffer,x
         lsr     digits_buffer+1,x
         nop
         dey
-        bne     L2300
-        ldy     #$04
+        bne     read_loop
+        ldy     #4              ; 4 bits per digit
         dex
-        bpl     L2300
+        bpl     read_loop
 .endproc
         .assert .sizeof(Patch1) = kPatchLength, error, "Patch length"
         Patch1_firmware_byte := Patch1::firmware_byte
@@ -746,7 +762,7 @@ command_loop:
         ;; except first byte where it's high nibble
 
         ldy     #4              ; 4 bits per digit
-        bne     read_status     ; always
+        bne     read_status     ; always; no waiting on first iteration
 
 read_loop:
 delay := * + 1
@@ -779,6 +795,7 @@ read_status:
 ;;; Patch 3:
 
 .proc Patch3
+        ;; Trigger reading
         lda     ENVBL
         sta     ENBXY
         sta     X0EDGE1
@@ -790,9 +807,18 @@ read_status:
         ldx     #$15
 L2364:  dex
         bne     L2364
-        ldx     #$09
-L2369:  ldy     #$04
-L236B:  lda     MOUSE_BTN
+
+        ;; ------------------------------
+        ;; Read bit out of register
+        ;; 1 bit at a time in blocks of 4, giving
+        ;; "MMDDhhmmss" in low nibble of each byte
+        ;; except first byte where it's high nibble
+
+        ldx     #9              ; # of digits - 1
+read_loop:
+        ldy     #4              ; bits per digit
+bit_loop:
+        lda     MOUSE_BTN
         rol     a
         ror     digits_buffer,x
         lsr     digits_buffer+1,x
@@ -805,9 +831,11 @@ L236B:  lda     MOUSE_BTN
         nop
         sta     X0EDGE1
         dey
-        bne     L236B
+        bne     bit_loop
         dex
-        bpl     L2369
+        bpl     read_loop
+
+        ;; Finish up
         lda     DISVBL
 .endproc
         .assert .sizeof(Patch3) = kPatchLength, error, "Patch length"
