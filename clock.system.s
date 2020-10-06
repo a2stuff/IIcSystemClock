@@ -6,6 +6,10 @@
         .org $2000
         .setcpu "65C02"
 
+;;; TODO: Identify 4 different clock drivers.
+;;; * IIc System Clock
+
+
 .enum MessageCode
         kInstall            =  0
         kNoSysFile          =  1
@@ -519,51 +523,59 @@ patch_target:
 .proc Patch0
 
 acia_command_patch1 := * + 1
+        ;; ------------------------------
+        ;; Save COMMAND register
         lda     PORT2_ACIA_COMMAND
-        pha                     ; Save command register
+        pha
 
-        ;; Poke COMMAND register
-        ldy     #3              ; tries
-        ldx     #22             ; delay
+        ;; ------------------------------
+        ;; Unlock COMMAND register
+        ldy     #3              ; cycles
+        ldx     #22             ; initial delay
         lda     #%00001000
 command_loop:
 acia_command_patch2 := * + 1
         sta     PORT2_ACIA_COMMAND
 
-:       dex
+:       dex                     ; wait
         bne     :-
 
         eor     #%00001010
-        ldx     #$09
+        ldx     #9              ; repeat delay
         dey
         bne     command_loop
 
+        ;; ------------------------------
+        ;; Read bit out of STATUS register
+        ;; 1 bit at a time in blocks of 4, giving
+        ;; "MMDDhhmm" in high nibble of each byte
 
-
-        ldy     #$04
-        bne     L2289
-L2284:
+        ldy     #4
+        bne     read            ; always
+read_loop:
 
 delay_patch1 := * + 1
         lda     #kDefaultDelay
 :       dec                     ; 65C02
         bne     :-
 
-L2289:
+read:
 acia_status_patch1 := * + 1
         lda     PORT2_ACIA_STATUS
+        rol     a               ; shift out bit 5
         rol     a
         rol     a
-        rol     a
-        ror     $0200,x
-        lsr     $0201,x
+        ror     digits_buffer,x ; and into digits
+        lsr     digits_buffer+1,x
         dey
-        bne     L2284
-        ldy     #$04
+        bne     read_loop
+        ldy     #4              ; 4 bits per digit
         dex
-        bpl     L2284
+        bpl     read_loop
 
-        pla                     ; Restore command register
+        ;; ------------------------------
+        ;; Restore COMMAND register
+        pla
 acia_command_patch3 := * + 1
         sta     PORT2_ACIA_COMMAND
 
@@ -577,7 +589,10 @@ acia_command_patch3 := * + 1
         ;; ...Patch applied to here.
         ;; --------------------------------------------------
 
-        ;; digits_buffer $200...$207 now has "MMDDhhmm", each digit as a byte
+        ;; digits_buffer $200...$207 now has "MMDDhhmm",
+        ;; each digit in the low (???) nibble of a separate byte (???)
+        ;; e.g.   1/1 01:01 would be ... ???
+        ;; e.g. 12/31 23:59 would be ... ???
 
         ;; --------------------------------------------------
         ;; Process fields (two digits/bytes at a time)
@@ -607,9 +622,10 @@ digit_loop:
         ;; --------------------------------------------------
         ;; Assign month in DATELO/DATEHI
 
-        ;; TODO: How do both digits of MM get processed ???
+        ;; TODO: Why does this process digits_buffer and not
+        ;; digits_buffer + 1?
 
-L22BA:  lda     digits_buffer   ; top nibble is month???
+L22BA:  lda     digits_buffer   ; top nibble is month ???
         asl     a               ; DATELO = mmmddddd
         and     #%11100000
         ora     DATELO
@@ -621,6 +637,7 @@ L22BA:  lda     digits_buffer   ; top nibble is month???
         sta     DATELO+1
         ;; --------------------------------------------------
 
+        ;; ???
         ldy     #$01
 :       lda     $0208,y
         ora     #$B0
@@ -661,8 +678,8 @@ time_offset_table       := * - 3
 
 Patches:
 
-        ;; --------------------------------------------------
-        ;; Patch #1
+;;; ============================================================
+;;; Patch 1:
 
 .proc Patch1
 firmware_byte    := * + 1
@@ -687,8 +704,8 @@ L2303:  sbc     #$01
         bne     L2303
 L2307:  lda     MOUSE_BTN
         rol     a
-        ror     $0200,x
-        lsr     $0201,x
+        ror     digits_buffer,x
+        lsr     digits_buffer+1,x
         nop
         dey
         bne     L2300
@@ -699,8 +716,8 @@ L2307:  lda     MOUSE_BTN
         .assert .sizeof(Patch1) = kPatchLength, error, "Patch length"
         Patch1_firmware_byte := Patch1::firmware_byte
 
-        ;; --------------------------------------------------
-        ;; Patch #2
+;;; ============================================================
+;;; Patch 2:
 
 .proc Patch2
         ;; Prime the command
@@ -733,8 +750,8 @@ read_status:
         rol     a
         rol     a
         rol     a
-        ror     $0200,x
-        lsr     $0201,x
+        ror     digits_buffer,x
+        lsr     digits_buffer+1,x
         dey
         bne     read_loop
         ldy     #$04
@@ -747,8 +764,8 @@ read_status:
         .assert .sizeof(Patch2) = kPatchLength, error, "Patch length"
         Patch2_delay := Patch2::delay
 
-        ;; --------------------------------------------------
-        ;; Patch #3
+;;; ============================================================
+;;; Patch 3:
 
 .proc Patch3
         lda     ENVBL
@@ -766,8 +783,8 @@ L2364:  dex
 L2369:  ldy     #$04
 L236B:  lda     MOUSE_BTN
         rol     a
-        ror     $0200,x
-        lsr     $0201,x
+        ror     digits_buffer,x
+        lsr     digits_buffer+1,x
         sta     X0EDGE2
         nop
         nop
