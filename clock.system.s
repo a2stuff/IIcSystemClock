@@ -31,10 +31,18 @@ has_80col := $09                ; 1 = has 80 column card
 month     := $0A                ; month from current date
 msg_num   := $0B                ; stashed message number
 
+digits_buffer := $200           ; temporary usage during clock read
+
 PRODOS_SYS_START := $2000
 
 SLOT3_FIRMWARE           := $C300
 
+;;; SSC in Slot 1
+PORT1_ACIA_STATUS  := $C099
+PORT1_ACIA_COMMAND := $C09A
+PORT1_ACIA_CONTROL := $C09B
+
+;;; SSC in Slot 2
 PORT2_ACIA_STATUS  := $C0A9
 PORT2_ACIA_COMMAND := $C0AA
 PORT2_ACIA_CONTROL := $C0AB
@@ -264,14 +272,15 @@ tries:  .byte   0
 
 L2110:  .byte   0
 
-L2111:  lda     mach_type
-        bne     L2135           ; not IIc
+.proc L2111
+        lda     mach_type
+        bne     skip            ; not IIc
         lda     L2110
-        bne     L2135
+        bne     skip
         inc     L2110
-        ldy     #$99
+        ldy     #<PORT1_ACIA_STATUS
         sty     acia_status_patch1
-        iny
+        iny                     ; <PORT1_ACIA_COMMAND
         sty     acia_command_patch1
         sty     acia_command_patch2
         lda     L11FE
@@ -280,7 +289,7 @@ L2111:  lda     mach_type
         sty     acia_command_patch3
         bne     L20FE
 
-L2135:  ldy     #MessageCode::kNoClock
+skip:   ldy     #MessageCode::kNoClock
         sty     msg_num
         lda     MACHID          ; Check for clock card
         ror     a
@@ -296,6 +305,7 @@ no_clock:
         sta     TIMELO
         sta     TIMELO+1
         jmp     ShowMessageAndMaybeChain
+.endproc
 
         ;; --------------------------------------------------
 
@@ -551,27 +561,36 @@ acia_command_patch3 := * + 1
         ;; ...Patch applied to here.
         ;; --------------------------------------------------
 
-        ;; Process digits
-        ldx     #6
-L22A3:  lda     $0201,x
+        ;; digits_buffer $200...$207 now has "MMDDhhmm", each digit as a byte
 
-:       dec     $0200,x         ;
+        ;; --------------------------------------------------
+        ;; Process fields (two digits/bytes at a time)
+
+        ldx     #6
+digit_loop:
+        lda     digits_buffer+1,x ; ones place
+
+:       dec     digits_buffer,x ; tens place
         bmi     :+
         clc
         adc     #10
         bcc     :-
 :
+        ;; A now holds binary value
 
         offset_table_addr := * + 1
         ldy     time_offset_table,x      ; Offset table
         sta     DEVNUM,y     ; y is offset from DEVNUM for some reason
         dex
         dex
-        bne     L22A3
+        bne     digit_loop
+
+        ;; Now TIMELO holds minutes, TIMEHI has hours,
+        ;; DATELO has days. Months has not been processed.
 
         ;; --------------------------------------------------
         ;; Assign month in DATELO/DATEHI
-L22BA:  lda     $0200           ; top nibble is month
+L22BA:  lda     digits_buffer   ; top nibble is month???
         asl     a               ; DATELO = mmmddddd
         and     #%11100000
         ora     DATELO
@@ -584,22 +603,34 @@ L22BA:  lda     $0200           ; top nibble is month
         ;; --------------------------------------------------
 
         ldy     #$01
-L22CE:  lda     $0208,y
+:       lda     $0208,y
         ora     #$B0
         sta     $020F,y
         dey
-        bpl     L22CE
+        bpl     :-
+
         dex
         bne     L22BA
-        plp
+
+        ;; --------------------------------------------------
+        ;; Exit driver
+        plp                     ; restore interrupt state
+
+        ;; HACK: This RTS=$60 doubles as the first real entry in the
+        ;; offset table.
+        .assert OPC_RTS = DATELO - DEVNUM, error, "Offset mismatch"
         rts
+
+        ;; Offset from MMDDhhmm digits to DATE/TIME fields in
+        ;; ProDOS global page. Only the even entries are used
+        ;; and months get special handling.
 
 time_offset_table       := * - 3
 
         .byte   $FF               ; dummy
-        .byte   TIMELO+1 - DEVNUM ; offset
+        .byte   TIMELO+1 - DEVNUM ; offset to hours field
         .byte   $FF               ; dummy
-        .byte   TIMELO - DEVNUM   ; offset
+        .byte   TIMELO - DEVNUM   ; offset to minutes field
 
         ;; End of relocated clock driver
 
