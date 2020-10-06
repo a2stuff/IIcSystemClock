@@ -55,6 +55,9 @@ kDefaultVersionByte     = HI(' ')
 
 kDefaultYear = 1986
 
+kDefaultDelay = $5D
+kPatchedDelay = $5C
+
 L2000:
         default_slot := * + 1
         lda     #kDefaultDriveSlot ; For easy patching???
@@ -65,9 +68,9 @@ L2000:
         bne     L2013
 
         sta     L239E + (L1272 - L1000) ; In relocated code
-        lda     #$5C
-        sta     L2285
-        sta     L2336
+        lda     #kPatchedDelay
+        sta     delay_patch1
+        sta     patch2_delay
 L2013:
         ;; Clear stack
         ldx     #$FF
@@ -220,29 +223,27 @@ assign: and     #%01110000      ; slot
 ;;; ------------------------------------------------------------
 
 kPatchLength = $38
-kPatch1Offset = $0
-kPatch2Offset = $38
-kPatch3Offset = $70
 
-;;; Patch1 - otherwise
-;;; Patch2 - for mach_type = IIc
+;;; Default -
+;;; Patch1  - otherwise
+;;; Patch2  - for mach_type = IIc
 ;;; Patch3
 
 select_patch:
-        ldy     #kPatch2Offset
+        ldy     #patch2 - Patches
         lda     mach_type
         beq     apply_patch     ; if IIc
-        ldy     #kPatch1Offset
+        ldy     #patch1 - Patches
         jmp     apply_patch
 
         ;; Patch bytes on top of driver
 not_iic:
-        ldy     #kPatch3Offset
+        ldy     #patch3 - Patches
 
 apply_patch:
-        ldx     #$00
+        ldx     #0
 :       lda     Patches,y
-        sta     L2269,x
+        sta     patch_target,x
         iny
         inx
         cpx     #kPatchLength
@@ -269,14 +270,14 @@ L2111:  lda     mach_type
         bne     L2135
         inc     L2110
         ldy     #$99
-        sty     L228A
+        sty     acia_status_patch1
         iny
-        sty     L226A
-        sty     L2274
+        sty     acia_command_patch1
+        sty     acia_command_patch2
         lda     L11FE
         and     #$03
         beq     L20FE
-        sty     L229F
+        sty     acia_command_patch3
         bne     L20FE
 
 L2135:  ldy     #MessageCode::kNoClock
@@ -500,15 +501,19 @@ Driver: cld
         cld                     ; TODO: Remove duplicate CLD
         php
         sei
-L2269:
-L226A           := * + 1
+
+        ;; --------------------------------------------------
+        ;; Patch applied from here...
+patch_target:
+
+acia_command_patch1 := * + 1
         lda     PORT2_ACIA_COMMAND
         pha                     ; Save command register
         ldy     #$03
         ldx     #$16
         lda     #%00001000
 L2273:
-L2274           := * + 1
+acia_command_patch2 := * + 1
         sta     PORT2_ACIA_COMMAND
 L2276:  dex
         bne     L2276
@@ -519,12 +524,14 @@ L2276:  dex
         ldy     #$04
         bne     L2289
 L2284:
-L2285           := * + 1
-        lda     #$5D
-L2286:  dec                     ; 65C02
-        bne     L2286
+
+delay_patch1 := * + 1
+        lda     #kDefaultDelay
+:       dec                     ; 65C02
+        bne     :-
+
 L2289:
-L228A           := * + 1
+acia_status_patch1 := * + 1
         lda     PORT2_ACIA_STATUS
         rol     a
         rol     a
@@ -538,8 +545,11 @@ L228A           := * + 1
         bpl     L2284
 
         pla                     ; Restore command register
-L229F           := * + 1
+acia_command_patch3 := * + 1
         sta     PORT2_ACIA_COMMAND
+
+        ;; ...Patch applied to here.
+        ;; --------------------------------------------------
 
         ;; Process digits
         ldx     #6
@@ -599,9 +609,11 @@ time_offset_table       := * - 3
 
 Patches:
 
+        ;; --------------------------------------------------
         ;; Patch #1
-patch1:
-patch1_firmware_byte    := * + 1
+
+.proc patch1
+firmware_byte    := * + 1
         lda     $C0E0           ; Set to $C0x0, n=slot+8
         lda     DISVBL
         ldy     #$01
@@ -631,33 +643,40 @@ L2307:  lda     MOUSE_BTN
         ldy     #$04
         dex
         bpl     L2300
-        .assert * - patch1 = kPatchLength, error, "Patch length"
+.endproc
+        .assert .sizeof(patch1) = kPatchLength, error, "Patch length"
+        patch1_firmware_byte := patch1::firmware_byte
 
         ;; --------------------------------------------------
         ;; Patch #2
-patch2:
-        .assert * = Patches + kPatch2Offset, error, "Offset changed"
 
+.proc patch2
+        ;; Prime the command
         lda     PORT2_ACIA_COMMAND
         nop
         ldy     #$03
         ldx     #$16
         lda     #%00000010
-L2324:  sta     PORT2_ACIA_COMMAND
-L2327:  dex
-        bne     L2327
+command_loop:
+        sta     PORT2_ACIA_COMMAND
+:       dex
+        bne     :-
         eor     #$0A
         ldx     #$09
         dey
-        bne     L2324
+        bne     command_loop
         ldy     #$04
-        bne     L233A
-L2335:
-L2336           := * + 1
-        lda     #$5D
-L2337:  dec                     ; 65C02
-        bne     L2337
-L233A:  lda     PORT2_ACIA_STATUS
+        bne     read_status     ; always
+
+        ;; Read the result
+read_loop:
+delay := * + 1
+        lda     #kDefaultDelay
+:       dec                     ; 65C02
+        bne     :-
+
+read_status:
+        lda     PORT2_ACIA_STATUS
         eor     #$20
         rol     a
         rol     a
@@ -665,21 +684,21 @@ L233A:  lda     PORT2_ACIA_STATUS
         ror     $0200,x
         lsr     $0201,x
         dey
-        bne     L2335
+        bne     read_loop
         ldy     #$04
         dex
-        bpl     L2335
+        bpl     read_loop
 
         nop
         nop
-
-        .assert * - patch2 = kPatchLength, error, "Patch length"
+.endproc
+        .assert .sizeof(patch2) = kPatchLength, error, "Patch length"
+        patch2_delay := patch2::delay
 
         ;; --------------------------------------------------
         ;; Patch #3
-patch3:
-        .assert * = Patches + kPatch3Offset, error, "Offset changed"
 
+.proc patch3
         lda     ENVBL
         sta     ENBXY
         sta     X0EDGE1
@@ -710,7 +729,8 @@ L236B:  lda     MOUSE_BTN
         dex
         bpl     L2369
         lda     DISVBL
-        .assert * - patch3 = kPatchLength, error, "Patch length"
+.endproc
+        .assert .sizeof(patch3) = kPatchLength, error, "Patch length"
 
 ;;; ============================================================
 
