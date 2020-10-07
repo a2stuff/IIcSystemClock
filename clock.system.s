@@ -437,22 +437,24 @@ install_ptr := * + 1
 ;;; $06 is trashed
 
 .proc YearFromBCD
+        tmp := $06
+
         lda     bcd_year
         pha
         lsr     a
         lsr     a
         lsr     a
         lsr     a
-        sta     $06
+        sta     tmp
         asl     a
         asl     a
-        adc     $06
+        adc     tmp
         asl     a
-        sta     $06
+        sta     tmp
         pla
         and     #$0F
         clc
-        adc     $06
+        adc     tmp
         sta     year
         rts
 .endproc
@@ -464,19 +466,21 @@ install_ptr := * + 1
 ;;; $06 is trashed
 
 .proc ConvertToBCD
+        tmp := $06
+
         ldx     #$FF
 :       inx
         sec
         sbc     #10
         bcs     :-
         adc     #10
-        sta     $06
+        sta     tmp
         txa
         asl     a
         asl     a
         asl     a
         asl     a
-        ora     $06
+        ora     tmp
         rts
 .endproc
 
@@ -946,12 +950,12 @@ entries_loop:
         bne     :-
         beq     next_entry      ; match - (but want *next* system file)
 
-L1053:  lda     $05
+L1053:  lda     name_length
         sta     open_pathname
         sta     $0280
-        inc     $05
+        inc     name_length
         lda     msg_num
-        cmp     #$07
+        cmp     #7
         beq     L1070
         ldy     #MessageCode::kIIc
         jsr     MaybeAddSeikoToMessage
@@ -964,6 +968,7 @@ L1053:  lda     $05
 L1070:  ldy     #MessageCode::kRunning
         jsr     ShowMessage
 
+        ;; Copy and print pathname being invoked
         ldy     #1
 :       lda     (entry_ptr),y
         sta     open_pathname,y
@@ -971,7 +976,7 @@ L1070:  ldy     #MessageCode::kRunning
         ora     #$80
         jsr     COUT
         iny
-        cpy     $05
+        cpy     name_length
         bne     :-
 
         jsr     LoadSysFile
