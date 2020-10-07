@@ -32,7 +32,7 @@ kErrDiskWriteProtected = $2B
 mach_type := $07                ; 0 = IIc, 1 = II+/IIe
 case_mask := $08                ; mask with chars before COUT
 has_80col := $09                ; 1 = has 80 column card
-month     := $0A                ; month from current date
+month     := $0A                ; month from current date ???
 msg_num   := $0B                ; stashed message number
 
 digits_buffer := $200           ; temporary usage during clock read
@@ -51,12 +51,12 @@ PORT2_ACIA_STATUS  := $C0A9
 PORT2_ACIA_COMMAND := $C0AA
 PORT2_ACIA_CONTROL := $C0AB
 
+;;; Actually registers for a clock card of some sort
 DISXY           := $C058
 ENBXY           := $C059
 X0EDGE1         := $C05C
 X0EDGE2         := $C05D
-
-MOUSE_BTN          := $C063
+MOUSE_BTN       := $C063
 
 kClockRoutineMaxLength = 125    ; Per ProDOS 8 TRM
 
@@ -79,7 +79,7 @@ L2000:
         cmp     #kIIcVersionByte
         bne     L2013
 
-        sta     L239E + (L1272 - L1000) ; In relocated code
+        sta     L239E + (L1272 - Chain) ; In relocated code
         lda     #kPatchedDelay
         sta     Patch0_delay
         sta     Patch2_delay
@@ -129,14 +129,15 @@ is_iic: sty     mach_type
 
         ;; Convert spaces to newlines if 40 Columns
         lda     #CR|$80
-        sta     chain + (wrap1 - L1000)
-        sta     chain + (wrap4 - L1000)
-        sta     chain + (wrap5 - L1000)
-        sta     chain + (wrap3 - L1000)
-        sta     chain + (wrap2 - L1000)
+        sta     chain + (wrap1 - Chain)
+        sta     chain + (wrap4 - Chain)
+        sta     chain + (wrap5 - Chain)
+        sta     chain + (wrap3 - Chain)
+        sta     chain + (wrap2 - Chain)
 
-        inc     L2095
-        inc     L2099
+        ;; Adjust everything down a line
+        inc     wndtop
+        inc     wndbtm
         bne     :+
 
 init_80_col:
@@ -163,7 +164,7 @@ loop:
 :
 
         write_msb :=  * + 2
-        sta     L1000,y
+        sta     Chain,y
         iny
         bne     loop
 
@@ -178,12 +179,13 @@ loop:
 L208F:  ldy     #MessageCode::kInstall
         jsr     ShowMessage
 
-L2095           := * + 1
-        ldy     #$03
-        sty     $22
-L2099           := * + 1
-        ldy     #$05
-        sty     $23
+        wndtop := * + 1
+        ldy     #3
+        sty     WNDTOP
+
+        wndbtm := * + 1
+        ldy     #5
+        sty     WNDBTM
 
         jsr     SetPrefixAndGetFileInfo
 
@@ -221,27 +223,28 @@ assign: and     #%01110000      ; slot
         ora     #$80
         sta     Patch1_firmware_byte ; Set $C0nn address
 .endscope
-        ;; --------------------------------------------------
 
-        lda     L11FE
-        and     #$03
-        beq     select_patch    ; apply patch2 if IIc, patch1 otherwise
-        cmp     #$02
-        bcs     L20FE
-        lda     mach_type
-        bne     not_iic         ; apply Patch3
-        beq     L20FE           ; always
 
 ;;; ------------------------------------------------------------
-
-kPatchLength = $38
+;;; Select and apply patch
 
 ;;; Patch0 - (default) SSC in either Slot 1 or Slot 2
 ;;; Patch1 - otherwise
-;;; Patch2 - for mach_type = IIc; SSC in Slot 2, COMMAND not restored
-;;; Patch3
+;;; Patch2 - IIc; SSC in Slot 2, COMMAND not restored
+;;; Patch3 -
 
-select_patch:
+kPatchLength = $38
+
+        lda     flags
+        and     #%00000011
+        beq     select2        ; apply Patch2 if IIc, Patch1 otherwise
+        cmp     #%00000010
+        bcs     check_time_maybe_install ; no patch
+        lda     mach_type
+        bne     not_iic         ; apply Patch3
+        beq     check_time_maybe_install           ; always
+
+select2:
         ldy     #Patch2 - Patches
         lda     mach_type
         beq     apply_patch     ; if IIc
@@ -261,10 +264,13 @@ apply_patch:
         cpx     #kPatchLength
         bne     :-
 
-        ;;
-L20FE:  lda     #2
+;;; ------------------------------------------------------------
+;;; Compute time and install clock driver
+
+check_time_maybe_install:
+        lda     #2
         sta     tries
-:       jsr     CalcMonthValidateDateTime
+:       jsr     InvokeDriverValidateDateTime
         bcs     L2111
         dec     tries
         bpl     :-
@@ -287,11 +293,11 @@ L2110:  .byte   0
         iny                     ; <PORT1_ACIA_COMMAND
         sty     Patch0_acia_command_patch1
         sty     Patch0_acia_command_patch2
-        lda     L11FE
-        and     #$03
-        beq     L20FE
+        lda     flags
+        and     #%00000011
+        beq     check_time_maybe_install
         sty     Patch0_acia_command_patch3
-        bne     L20FE
+        bne     check_time_maybe_install
 
 skip:   ldy     #MessageCode::kNoClock
         sty     msg_num
@@ -300,7 +306,7 @@ skip:   ldy     #MessageCode::kNoClock
         bcc     no_clock        ; Bit 0 = 0 means no clock card
 
         jsr     MON_HOME
-        jmp     L1000
+        jmp     Chain
 
 no_clock:
         lda     #0
@@ -327,7 +333,7 @@ install_clock:
         lda     month
         cmp     #11
         bcc     :+
-        bit     L11FE
+        bit     flags
         bpl     :+
         sta     $1204
 :       lda     $1204
@@ -343,10 +349,12 @@ install_clock:
         bcs     L21DF
 
 skip:   bit     KBDSTRB
-        rol     L11FE
+
+        ;; Set high bit of flags to (month >= 3) ???
+        rol     flags
         lda     #3
         cmp     month
-        ror     L11FE
+        ror     flags
 
         ;; --------------------------------------------------
         ;; Show current year prompt
@@ -420,7 +428,7 @@ install_ptr := * + 1
         lda     ROMIN2          ; Bank ROM back in
 
         ;; Chain
-        jmp     L1000
+        jmp     Chain
 
 ;;; ------------------------------------------------------------
 ;;; Convert year from BCD
@@ -473,9 +481,11 @@ install_ptr := * + 1
 .endproc
 
 ;;; ------------------------------------------------------------
-;;; Returns with carry set if date is not valid.
+;;; Invoke the driver, then verify that the result is a valid
+;;; date/time.
+;;; Output: Carry clear if valid, set otherwise.
 
-.proc CalcMonthValidateDateTime
+.proc InvokeDriverValidateDateTime
         jsr     InvokeDriver
 
         ;; Check month
@@ -516,10 +526,9 @@ Driver: cld
         php
         sei
 
+patch_target:
         ;; --------------------------------------------------
         ;; Patch applied from here...
-patch_target:
-
 .proc Patch0
 
 acia_command_patch1 := * + 1
@@ -872,12 +881,12 @@ L239E:
         ;; Relocated to $1000
 
 ;;; ============================================================
-;;; Chaining code???
+;;; Chain to next .SYSTEM file
 ;;; ============================================================
 
         .org $1000
 
-.proc L1000
+.proc Chain
 
 entry_ptr               := $00
 entry_length            := $02
@@ -944,12 +953,12 @@ L1053:  lda     $05
         lda     msg_num
         cmp     #$07
         beq     L1070
-        ldy     #$03
-        jsr     L10E5
+        ldy     #MessageCode::kIIc
+        jsr     MaybeAddSeikoToMessage
 
         lda     mach_type
         beq     :+
-        iny
+        iny                     ; k(Seiko)IIc --> k(Seiko)IIe
 :       jsr     ShowMessage
 
 L1070:  ldy     #MessageCode::kRunning
@@ -1014,12 +1023,12 @@ next_entry:
         sta     entry_ptr+1
 L10E2:  jmp     entries_loop
 
-;;; ???
-.proc L10E5
-        lda     L11FE
-        and     #$03
+
+.proc MaybeAddSeikoToMessage
+        lda     flags
+        and     #%00000011
         bne     :+
-        ldy     #$09
+        ldy     #MessageCode::kSeikoIIc
 :       rts
 .endproc
 
@@ -1169,7 +1178,7 @@ retry:
         bne     loop
         lda     #OPC_RTS
         sta     DATETIME
-        jmp     L1000
+        jmp     Chain
 
 loop:   jmp     loop           ; Infinite loop!
 .endproc
@@ -1247,8 +1256,17 @@ file_info_params:
 ;;; ------------------------------------------------------------
 ;;; Misc variables
 
-L11FE:  .byte   0               ; ???
-bcd_year:   .byte   0           ; 2-digit (shared)
+
+;;; bit 0/1:     00 - if IIc => Patch2, else => Patch1
+;;;              01 - if IIc => Patch0, else => Patch3
+;;;              10 - Patch0
+;;;              11 - Patch0
+;;; ...
+;;; bit 7
+flags:  .byte   0
+
+bcd_year:
+        .byte   0               ; 2-digit (shared)
 
 L1200:
         ;; buffer for variables, filename
