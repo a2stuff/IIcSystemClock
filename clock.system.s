@@ -50,12 +50,14 @@ PORT2_ACIA_STATUS  := $C0A9
 PORT2_ACIA_COMMAND := $C0AA
 PORT2_ACIA_CONTROL := $C0AB
 
-;;; Actually registers for a clock card of some sort
-DISXY           := $C058
-ENBXY           := $C059
-X0EDGE1         := $C05C
-X0EDGE2         := $C05D
-MOUSE_BTN       := $C063
+;;; Annunciators/switch inputs - clock in game adapter port?
+CLRAN0          := $C058
+SETAN0          := $C059
+CLRAN1          := $C05A
+SETAN1          := $C05B
+CLRAN2          := $C05C
+SETAN2          := $C05D
+RD63            := $C063        ; Switch Input 3
 
 kClockRoutineMaxLength = 125    ; Per ProDOS 8 TRM
 
@@ -68,6 +70,8 @@ kDefaultYear = 1986
 
 kDefaultDelay = $5D
 kPatchedDelay = $5C
+
+;;; ============================================================
 
 L2000:
         default_slot := * + 1
@@ -135,8 +139,8 @@ is_iic: sty     mach_type
         sta     chain + (wrap2 - Chain)
 
         ;; Adjust everything down a line
-        inc     wndtop
-        inc     wndbtm
+        inc     DoInstall_wndtop
+        inc     DoInstall_wndbtm
         bne     :+
 
 init_80_col:
@@ -159,7 +163,7 @@ loop:
         check_msb := * + 2      ; check for second $FF
         ldx     L239E+1,y
         cpx     #$FF
-        beq     L208F           ; done!
+        beq     DoInstall           ; done!
 :
 
         write_msb :=  * + 2
@@ -174,8 +178,10 @@ loop:
         bne     loop            ; always
 .endproc
 
+;;; ============================================================
 
-L208F:  ldy     #MessageCode::kInstall
+.proc DoInstall
+        ldy     #MessageCode::kInstall
         jsr     ShowMessage
 
         wndtop := * + 1
@@ -243,8 +249,6 @@ assign: and     #%01110000      ; slot
 ;;; Patch2 - SSC in Slot 2, COMMAND not restored
 ;;; Patch3 -
 
-kPatchLength = $38
-
         lda     flags
         and     #%00000011
         beq     not_seiko       ; not Seiko
@@ -280,21 +284,19 @@ apply_patch:
 check_time_maybe_install:
         lda     #2              ; 3 tries total
         sta     tries
-        ;; On IIc, first try with serial port
-        ;; On IIc, second try is with printer port
-        ;; On IIc, third try fails
-        ;; On IIe, first try is with ???
-        ;; On IIe, second try fails
-
 :       jsr     InvokeDriverValidateDateTime
         bcs     MaybeTryOtherPort
-        dec     tries
+        dec     tries           ; avoid false positives?
         bpl     :-
-        bmi     install_clock   ; always... but should never run ???
+        bmi     InstallClock   ; always
 
 tries:  .byte   0
 
-;;; ------------------------------------------------------------
+.endproc
+        DoInstall_wndtop := DoInstall::wndtop
+        DoInstall_wndbtm := DoInstall::wndbtm
+
+;;; ============================================================
 
 tried_port1_flag:  .byte   0
 
@@ -315,11 +317,11 @@ tried_port1_flag:  .byte   0
         sty     Patch0_acia_command_patch2
         lda     flags
         and     #%00000011
-        beq     check_time_maybe_install
+        beq     DoInstall::check_time_maybe_install
 
         sty     Patch0_acia_command_patch3
         ;; Try again
-        bne     check_time_maybe_install ; always
+        bne     DoInstall::check_time_maybe_install ; always
 
         ;; --------------------------------------------------
 
@@ -341,9 +343,12 @@ no_clock:
         jmp     ShowMessageAndChainOrHang ; will chain since kNoClock
 .endproc
 
-        ;; --------------------------------------------------
+;;; ============================================================
+;;; Run after the selected driver has been verified to work.
+;;; Prompts for current year, updates the timestamped file on disk,
+;;; patches/relocates the driver, and then chains to next file.
 
-install_clock:
+.proc InstallClock
         lda     #OPC_JMP_abs
         sta     DATETIME
         lda     MACHID
@@ -392,7 +397,7 @@ retry:
         ldy     #MessageCode::kOkPrompt
         jsr     ShowMessage
 
-        ;; Wait for keypress
+        ;; Wait for Y/N keypress
 :       jsr     RDKEY
         and     #%11011111      ; lowercase --> uppercase
         cmp     #'Y'|$80
@@ -417,14 +422,14 @@ retry:
         jmp     retry
 .endscope
 
-        ;; --------------------------------------------------
-        ;; Current year is okay
+        ;; Current year is okay - update the file with date/timestamp
 year_ok:
-        lda     $1204
+        lda     $1204           ; unused???
         jsr     YearFromBCD
         jsr     InvokeDriver
         jsr     WriteFileInfo
 
+        ;; Patch clock driver
 L21DF:  lda     RWRAM1          ; Driver lives in LC Bank 1
         lda     RWRAM1          ; so bank that in
 
@@ -452,8 +457,9 @@ install_ptr := * + 1
 
         ;; Chain
         jmp     Chain
+.endproc
 
-;;; ------------------------------------------------------------
+;;; ============================================================
 ;;; Convert year from BCD
 ;;; Input: bcd_year
 ;;; Output: year
@@ -482,7 +488,7 @@ install_ptr := * + 1
         rts
 .endproc
 
-;;; ------------------------------------------------------------
+;;; ============================================================
 ;;; Convert to BCD
 ;;; Input: A = number
 ;;; Output: A = BCD number
@@ -507,7 +513,7 @@ install_ptr := * + 1
         rts
 .endproc
 
-;;; ------------------------------------------------------------
+;;; ============================================================
 ;;; Invoke the driver, then verify that the result is a valid
 ;;; date/time.
 ;;; Output: Carry clear if valid, set otherwise.
@@ -556,6 +562,8 @@ Driver: cld
 patch_target:
         ;; --------------------------------------------------
         ;; Patch applied from here...
+kPatchLength = $38
+
 .proc Patch0
 
 acia_command_patch1 := * + 1
@@ -721,14 +729,14 @@ Patches:
         ;; Trigger reading
 firmware_byte    := * + 1
         lda     $C0E0           ; Set to $C0x0, n=slot+8
-        lda     DISVBL
+        lda     CLRAN1
 
         ldy     #1
         ldx     #22
 trigger_loop:
         dex
         bne     trigger_loop
-        lda     DISVBL,y
+        lda     CLRAN1,y
         ldx     #11
         dey
         bpl     trigger_loop
@@ -754,7 +762,7 @@ read_loop:
         bne     :-
 
 read_register:
-        lda     MOUSE_BTN
+        lda     RD63
         rol     a
         ror     digits_buffer,x
         lsr     digits_buffer+1,x
@@ -832,14 +840,14 @@ read_status:
 
 .proc Patch3
         ;; Trigger reading
-        lda     ENVBL
-        sta     ENBXY
-        sta     X0EDGE1
+        lda     SETAN1
+        sta     SETAN0
+        sta     CLRAN2
         nop
         nop
         nop
         nop
-        lda     DISXY
+        lda     CLRAN0
 
         ldx     #21
 :       dex                     ; wait
@@ -855,25 +863,25 @@ read_status:
 read_loop:
         ldy     #4              ; bits per digit
 bit_loop:
-        lda     MOUSE_BTN
+        lda     RD63
         rol     a
         ror     digits_buffer,x
         lsr     digits_buffer+1,x
-        sta     X0EDGE2
+        sta     SETAN2
         nop
         nop
         nop
         nop
         nop
         nop
-        sta     X0EDGE1
+        sta     CLRAN2
         dey
         bne     bit_loop
         dex
         bpl     read_loop
 
         ;; Finish up
-        lda     DISVBL
+        lda     CLRAN1
 .endproc
         .assert .sizeof(Patch3) = kPatchLength, error, "Patch length"
 
