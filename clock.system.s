@@ -9,7 +9,6 @@
 ;;; TODO: Identify 4 different clock drivers.
 ;;; * IIc System Clock
 
-
 .enum MessageCode
         kInstall            =  0
         kNoSysFile          =  1
@@ -228,23 +227,34 @@ assign: and     #%01110000      ; slot
 ;;; ------------------------------------------------------------
 ;;; Select and apply patch
 
+;;; flags   mach_type   Version
+;;; ...00   0           Patch2          IIc
+;;; ...01   0           Patch0          IIc     Seiko
+;;; ...10   0           Patch0          IIc     Seiko
+;;; ...11   0           Patch0          IIc     Seiko
+;;; ...00   1           Patch1          IIe     Seiko
+;;; ...01   1           Patch3          IIe     Seiko
+;;; ...10   1           Patch0          IIe     Seiko
+;;; ...11   1           Patch0          IIe     Seiko
+
+
 ;;; Patch0 - (default) SSC in either Slot 1 or Slot 2
-;;; Patch1 - otherwise
-;;; Patch2 - IIc; SSC in Slot 2, COMMAND not restored
+;;; Patch1 -
+;;; Patch2 - SSC in Slot 2, COMMAND not restored
 ;;; Patch3 -
 
 kPatchLength = $38
 
         lda     flags
         and     #%00000011
-        beq     select2        ; apply Patch2 if IIc, Patch1 otherwise
+        beq     not_seiko       ; not Seiko
         cmp     #%00000010
         bcs     check_time_maybe_install ; no patch
         lda     mach_type
         bne     not_iic         ; apply Patch3
         beq     check_time_maybe_install           ; always
 
-select2:
+not_seiko:
         ldy     #Patch2 - Patches
         lda     mach_type
         beq     apply_patch     ; if IIc
@@ -268,26 +278,36 @@ apply_patch:
 ;;; Compute time and install clock driver
 
 check_time_maybe_install:
-        lda     #2
+        lda     #2              ; 3 tries total
         sta     tries
+        ;; On IIc, first try with serial port
+        ;; On IIc, second try is with printer port
+        ;; On IIc, third try fails
+        ;; On IIe, first try is with ???
+        ;; On IIe, second try fails
+
 :       jsr     InvokeDriverValidateDateTime
-        bcs     L2111
+        bcs     MaybeTryOtherPort
         dec     tries
         bpl     :-
-        bmi     install_clock   ; always
+        bmi     install_clock   ; always... but should never run ???
 
 tries:  .byte   0
 
 ;;; ------------------------------------------------------------
 
-L2110:  .byte   0
+tried_port1_flag:  .byte   0
 
-.proc L2111
+.proc MaybeTryOtherPort
         lda     mach_type
-        bne     skip            ; not IIc
-        lda     L2110
-        bne     skip
-        inc     L2110
+        bne     fail            ; not IIc - give up
+
+        ;; Is a IIc - have we tried the other port?
+        lda     tried_port1_flag
+        bne     fail            ; yes - give up
+
+        ;; Switch to printer port...
+        inc     tried_port1_flag
         ldy     #<PORT1_ACIA_STATUS
         sty     Patch0_acia_status_patch1
         iny                     ; <PORT1_ACIA_COMMAND
@@ -296,10 +316,14 @@ L2110:  .byte   0
         lda     flags
         and     #%00000011
         beq     check_time_maybe_install
-        sty     Patch0_acia_command_patch3
-        bne     check_time_maybe_install
 
-skip:   ldy     #MessageCode::kNoClock
+        sty     Patch0_acia_command_patch3
+        ;; Try again
+        bne     check_time_maybe_install ; always
+
+        ;; --------------------------------------------------
+
+fail:   ldy     #MessageCode::kNoClock
         sty     msg_num
         lda     MACHID          ; Check for clock card
         ror     a
@@ -314,11 +338,10 @@ no_clock:
         sta     DATELO+1
         sta     TIMELO
         sta     TIMELO+1
-        jmp     ShowMessageAndMaybeChain
+        jmp     ShowMessageAndChainOrHang ; will chain since kNoClock
 .endproc
 
         ;; --------------------------------------------------
-
 
 install_clock:
         lda     #OPC_JMP_abs
@@ -817,9 +840,10 @@ read_status:
         nop
         nop
         lda     DISXY
-        ldx     #$15
-L2364:  dex
-        bne     L2364
+
+        ldx     #21
+:       dex                     ; wait
+        bne     :-
 
         ;; ------------------------------
         ;; Read bit out of register
@@ -945,18 +969,20 @@ entries_loop:
         ldy     #strlen_str_clock_system
 :       lda     (entry_ptr),y
         cmp     str_clock_system,y
-        bne     L1053
+        bne     :+
         dey
         bne     :-
         beq     next_entry      ; match - (but want *next* system file)
 
-L1053:  lda     name_length
+:       lda     name_length
         sta     open_pathname
         sta     $0280
         inc     name_length
+
+        ;; Show clock type message
         lda     msg_num
-        cmp     #7
-        beq     L1070
+        cmp     #MessageCode::kNoClock
+        beq     show_running
         ldy     #MessageCode::kIIc
         jsr     MaybeAddSeikoToMessage
 
@@ -965,7 +991,8 @@ L1053:  lda     name_length
         iny                     ; k(Seiko)IIc --> k(Seiko)IIe
 :       jsr     ShowMessage
 
-L1070:  ldy     #MessageCode::kRunning
+show_running:
+        ldy     #MessageCode::kRunning
         jsr     ShowMessage
 
         ;; Copy and print pathname being invoked
@@ -1017,7 +1044,7 @@ next_entry:
         tya
         bne     :+
         ldy     #MessageCode::kNoSysFile
-        jmp     ShowMessageAndMaybeChain
+        jmp     ShowMessageAndChainOrHang ; will hang since not kNoClock
 
 :       jsr     ReadBlock
         lda     #$00
@@ -1171,10 +1198,10 @@ retry:
         ;; fall through
 .endproc
 
-;;; Show message and chain to next system file, unless
-;;; kNoClock (in which case: hang)
+;;; Show message. If kNoClock, then chain to next system file;
+;;; otherwise: hang.
 
-.proc ShowMessageAndMaybeChain
+.proc ShowMessageAndChainOrHang
         sty     msg_num
         jsr     ShowMessage
         jsr     Bell
@@ -1262,12 +1289,12 @@ file_info_params:
 ;;; Misc variables
 
 
-;;; bit 0/1:     00 - if IIc => Patch2, else => Patch1
-;;;              01 - if IIc => Patch0, else => Patch3
-;;;              10 - Patch0
-;;;              11 - Patch0
+;;; bit 0/1:    00 - if IIc => Patch2, else => Patch1
+;;;             01 - if IIc => Patch0, else => Patch3; Seiko
+;;;             10 - Patch0; Seiko
+;;;             11 - Patch0; Seiko
 ;;; ...
-;;; bit 7
+;;; bit 7:
 flags:  .byte   0
 
 bcd_year:
