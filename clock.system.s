@@ -7,8 +7,11 @@
         .setcpu "65C02"
 
 ;;; TODO: Identify 4 different clock drivers.
-;;; * IIc System Clock
-
+;;; * IIc System Clock (via Serial or Printer port)
+;;; * Seiko DataGraph (via IIe Gameport)
+;;; * Seiko DataGraph (via IIc Serial)
+;;; * ???
+;;; See https://www.applefritter.com/node/176 for some details
 .enum MessageCode
         kInstall            =  0
         kNoSysFile          =  1
@@ -235,19 +238,20 @@ assign: and     #%01110000      ; slot
 
 ;;; flags   mach_type   Version
 ;;; ...00   0           Patch2          IIc
-;;; ...01   0           Patch0          IIc     Seiko
-;;; ...10   0           Patch0          IIc     Seiko
-;;; ...11   0           Patch0          IIc     Seiko
-;;; ...00   1           Patch1          IIe     Seiko
-;;; ...01   1           Patch3          IIe     Seiko
-;;; ...10   1           Patch0          IIe     Seiko
-;;; ...11   1           Patch0          IIe     Seiko
+;;; ...01   0           Patch0          IIc     Seiko DataGraph
+;;; ...10   0           Patch0          IIc     Seiko DataGraph
+;;; ...11   0           Patch0          IIc     Seiko DataGraph
+
+;;; ...00   1           Patch1          IIe     Seiko DataGraph
+;;; ...01   1           Patch3          IIe     Seiko DataGraph
+;;; ...10   1           Patch0          IIe     Seiko DataGraph
+;;; ...11   1           Patch0          IIe     Seiko DataGraph
 
 
-;;; Patch0 - (default) SSC in either Slot 1 or Slot 2
-;;; Patch1 -
+;;; Patch0 - (default) IIc System Clock - SSC in either Slot 1 or Slot 2
+;;; Patch1 - Seiko DataGraph in Gameport ???
 ;;; Patch2 - SSC in Slot 2, COMMAND not restored
-;;; Patch3 -
+;;; Patch3 - Seiko DataGraph in Gameport ???
 
         lda     flags
         and     #%00000011
@@ -565,6 +569,7 @@ patch_target:
 kPatchLength = $38
 
 .proc Patch0
+;;; Driver for IIc System Clock (via either Port 2 or Port 1)
 
 acia_command_patch1 := * + 1
         ;; ------------------------------
@@ -724,11 +729,13 @@ Patches:
 
 ;;; ============================================================
 ;;; Patch 1:
+;;;
+;;; Driver for Seiko DataGraph via IIe Gameport
 
 .proc Patch1
         ;; Trigger reading
 firmware_byte    := * + 1
-        lda     $C0E0           ; Set to $C0x0, n=slot+8
+        lda     $C0E0           ; Set to $C0x0, n=slot+8 - Disk II PHASE0 ???
         lda     CLRAN1
 
         ldy     #1
@@ -778,6 +785,8 @@ read_register:
 
 ;;; ============================================================
 ;;; Patch 2:
+;;;
+;;; Driver for Seiko DataGraph via IIc Serial Communication Port (???)
 
 .proc Patch2
         lda     PORT2_ACIA_COMMAND ; unused
@@ -837,6 +846,8 @@ read_status:
 
 ;;; ============================================================
 ;;; Patch 3:
+;;;
+;;; Driver for Seiko Datagraph via IIe Gameport (different model ???)
 
 .proc Patch3
         ;; Trigger reading
