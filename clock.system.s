@@ -199,7 +199,7 @@ loop:
 
         lda     file_info_params + GET_FILE_INFO_PARAMS::mod_date + 1
         lsr     a
-        sta     year
+        sta     year            ; patch driver
         jsr     ConvertToBCD
         sta     bcd_year
 
@@ -488,7 +488,7 @@ install_ptr := * + 1
         and     #$0F
         clc
         adc     tmp
-        sta     year
+        sta     year            ; patch driver
         rts
 .endproc
 
@@ -649,6 +649,10 @@ acia_command_patch3 := * + 1
         ;; --------------------------------------------------
         ;; Process fields (two digits/bytes at a time)
 
+        ;; 6 and 7 (minute) --> TIMELO
+        ;; 4 and 5 (hour)   --> TIMEHI
+        ;; 2 and 3 (day)    --> DATELO
+
         ldx     #6
 digit_loop:
         lda     digits_buffer+1,x ; ones place
@@ -662,8 +666,8 @@ digit_loop:
         ;; A now holds binary value
 
         offset_table_addr := * + 1
-        ldy     time_offset_table,x      ; Offset table
-        sta     DEVNUM,y  ; y is offset from DEVNUM for RTS hack below
+        ldy     time_offset_table,x
+        sta     DATELO - OPC_RTS,y ; y is offset by $60 for RTS hack below
         dex
         dex
         bne     digit_loop
@@ -674,22 +678,22 @@ digit_loop:
         ;; --------------------------------------------------
         ;; Assign month in DATELO/DATEHI
 
-L22BA:  lda     digits_buffer   ; top nibble is month
-        asl     a               ; DATELO = mmmddddd
-        and     #%11100000
+L22BA:  lda     digits_buffer   ; top nibble is month (mmmm0000)
+        asl     a               ; C=MSB of month
+        and     #%11100000      ; DATELO = mmmddddd
         ora     DATELO
         sta     DATELO
 
-        year := * + 1
+        year := * + 1           ; modified by installer
         lda     #(kDefaultYear .mod 100)
-        rol     a               ; DATEHI = yyyyyyym, shift in month bit
+        rol     a               ; DATEHI = yyyyyyym, shift in month MSB
         sta     DATELO+1
         ;; --------------------------------------------------
 
-        ;; ???
+        ;; Convert $207/$208 to ASCII digits at $20E/$02F (Why???)
         ldy     #$01
 :       lda     $0208,y
-        ora     #$B0
+        ora     #$B0            ; '0'|$80
         sta     $020F,y
         dey
         bpl     :-
@@ -705,7 +709,8 @@ L22BA:  lda     digits_buffer   ; top nibble is month
 
         ;; HACK: This RTS=$60 doubles as the first real entry in the
         ;; offset table.
-        .assert OPC_RTS = DATELO - DEVNUM, error, "Offset mismatch"
+        .assert OPC_RTS = $60, error, "Offset mismatch"
+        ;;
         rts
 
         ;; Offset from MMDDhhmm digits to DATE/TIME fields in
@@ -715,9 +720,9 @@ L22BA:  lda     digits_buffer   ; top nibble is month
 time_offset_table       := * - 3
 
         .byte   $FF               ; dummy
-        .byte   TIMELO+1 - DEVNUM ; offset to hours field
+        .byte   TIMELO+1 - DATELO + OPC_RTS ; offset to hours field
         .byte   $FF               ; dummy
-        .byte   TIMELO - DEVNUM   ; offset to minutes field
+        .byte   TIMELO   - DATELO + OPC_RTS ; offset to minutes field
 
         ;; End of relocated clock driver
 
