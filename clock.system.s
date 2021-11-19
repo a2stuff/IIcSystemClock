@@ -134,7 +134,7 @@ is_iic: sty     mach_type
         bne     init_80_col
 
         ;; Convert spaces to newlines if 40 Columns
-        lda     #CR|$80
+        lda     #HI(CR)
         sta     chain + (wrap1 - Chain)
         sta     chain + (wrap4 - Chain)
         sta     chain + (wrap5 - Chain)
@@ -404,9 +404,9 @@ retry:
         ;; Wait for Y/N keypress
 :       jsr     RDKEY
         and     #%11011111      ; lowercase --> uppercase
-        cmp     #'Y'|$80
+        cmp     #HI('Y')
         beq     year_ok
-        cmp     #'N'|$80
+        cmp     #HI('N')
         bne     :-
 
         ;; Prompt for two digit year
@@ -693,7 +693,7 @@ L22BA:  lda     digits_buffer   ; top nibble is month (mmmm0000)
         ;; Convert $207/$208 to ASCII digits at $20E/$02F (Why???)
         ldy     #$01
 :       lda     $0208,y
-        ora     #$B0            ; '0'|$80
+        ora     #HI('0')
         sta     $020F,y
         dey
         bpl     :-
@@ -915,9 +915,9 @@ bit_loop:
 
 .proc GetDigitKey
         jsr     RDKEY
-        cmp     #'0' | $80
+        cmp     #HI('0')
         bcc     GetDigitKey
-        cmp     #('9'+1) | $80
+        cmp     #HI('9')+1
         bcs     GetDigitKey
         jmp     COUT
 .endproc
@@ -1110,7 +1110,7 @@ L10E2:  jmp     entries_loop
         ptr := *+1
 loop:   lda     $F000,y
         beq     done
-        cmp     #'`'|$80        ; Not lower case?
+        cmp     #HI('`')        ; Not lower case?
         bcc     :+
         and     case_mask
 :       jsr     COUT
